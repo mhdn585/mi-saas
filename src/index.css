@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: 255 255 255;
+    --fg: 10 10 10;
+    --line: 10 10 10;
+    --surface: 255 255 255;
+    --muted: 115 115 115;
+    --accent: 10 10 10;
+    --accent-fg: 255 255 255;
+  }
+
+  .dark {
+    --bg: 24 24 24;
+    --fg: 245 245 245;
+    --line: 245 245 245;
+    --surface: 33 33 33;
+    --muted: 155 155 155;
+    --accent: 245 245 245;
+    --accent-fg: 24 24 24;
+  }
+
+  body {
+    @apply bg-bg text-fg antialiased;
+  }
+
+  ::selection {
+    background: rgb(var(--fg));
+    color: rgb(var(--bg));
+  }
+
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+}

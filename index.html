@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="CreaTienda — Crea y gestiona tus tiendas online" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>CreaTienda — Crea tu tienda online</title>
+    <script>
+      try {
+        var raw = localStorage.getItem('creatienda:ui')
+        var theme = raw ? (JSON.parse(raw).state || {}).theme : null
+        if (
+          theme === 'dark' ||
+          (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        ) {
+          document.documentElement.classList.add('dark')
+        }
+      } catch (error) {
+        void error
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,229 @@
+================================================================================
+ CREATIENDA — CATÁLOGO DE COMPONENTES DEL FRONTEND / GUI
+ Proyecto: sistema de creación de tiendas online (prototipo React + TS + Vite)
+ Uso: nombra cualquier entrada de este archivo en tus prompts para indicar
+       con exactitud qué parte de la interfaz quieres modificar.
+ convención: NOMBRE — src/ruta/ext — descripción
+================================================================================
+
+--------------------------------------------------------------------------------
+0. ESTRUCTURA GENERAL DE LA APP
+--------------------------------------------------------------------------------
+App                — src/app/App.tsx                — Raíz: envuelve todo con ThemeProvider (tema claro/oscuro), BrowserRouter (rutas) y Toaster (avisos flotantes).
+AppRoutes          — src/app/routes.tsx             — Tabla de todas las rutas del sistema (merchant, storefront y 404).
+NotFoundPage       — src/app/pages/NotFoundPage.tsx — Pantalla "Página no encontrada" con ícono de alerta y botón "Ir a mis tiendas".
+main.tsx           — src/main.tsx                   — Punto de entrada; monta App en #root.
+ThemeProvider      — src/theme/ThemeProvider.tsx    — Aplica la clase "dark" al <html> según el tema guardado.
+Tokens de tema     — src/index.css                  — Variables CSS del esquema blanco/negro: --bg (fondo), --fg (texto), --line (bordes), --surface (tarjetas), --muted (gris secundario), --accent / --accent-fg (relleno invertido, ej. botones). Claro: fondo blanco/bordes negros. Oscuro: fondo gris oscuro/bordes blancos.
+Tailwind classes   — tailwind.config.js             — Colores utilitarios derivados de los tokens: bg-bg, text-fg, border-line, bg-surface, text-muted, bg-accent, text-accent-fg.
+
+--------------------------------------------------------------------------------
+1. MÓDULO CLIENTE — TIENDA PÚBLICA (rutas /shop/:storeId)
+--------------------------------------------------------------------------------
+
+PÁGINAS:
+StorefrontLayout   — src/features/customer/storefront/pages/StorefrontLayout.tsx
+                     Marco de toda la tienda pública: header fijo arriba + main + footer.
+                     Si la tienda no existe: pantalla "Tienda no disponible".
+StorefrontHeader   — (dentro de StorefrontLayout)
+                     Barra superior fija: cajón logo (o ícono de tienda) + nombre de la tienda (clic = inicio),
+                     link "Catálogo" (subrayado si activo), botón "Carrito" con contador de ítems (chip
+                     redondo invertido), y ThemeToggle.
+StorefrontFooter   — (dentro de StorefrontLayout)
+                     Pie discreto centrado: "Tienda creada con CreaTienda".
+
+CatalogPage        — src/features/customer/catalog/pages/CatalogPage.tsx
+                     Página principal de la tienda (índice de /shop/:storeId).
+                     Muestra: párrafo descripción de la tienda, título "Catálogo" con contador,
+                     buscador del catálogo (input con ícono de lupa), y grid de productos
+                     (2 col móvil / 3 sm / 4 lg).
+                     Estados vacíos: "Esta tienda aún no tiene productos" y "Sin resultados".
+ProductCard        — src/features/customer/catalog/components/ProductCard.tsx
+                     Tarjeta clickeable de producto en el catálogo: foto cuadrada (o placeholder con
+                     ícono de imagen), nombre (1 línea), descripción (2 líneas), precio, y badges
+                     "Agotado" / "Últimas unidades".
+
+ProductDetailPage  — src/features/customer/product-viewer/pages/ProductDetailPage.tsx
+                     Visualizador de producto (ruta /shop/:storeId/products/:productId).
+                     Layout 2 columnas: galería a la izquierda; a la derecha: link "Volver al catálogo",
+                     nombre, precio grande, badge de stock "N disponibles" o "Agotado", indicador
+                     "N en tu carrito", descripción, selector de cantidad + botón "Agregar al carrito",
+                     y avisos "No disponible" / "Todo en el carrito".
+ImageGallery       — src/features/customer/product-viewer/components/ImageGallery.tsx
+                     Visor de fotos del producto: imagen principal (cuadrada), flechas redondas
+                     anterior/siguiente, contador "2 / 6", fila de miniaturas clicables (la activa
+                     con anillo), y placeholder "Este producto no tiene fotos".
+
+CartPage           — src/features/customer/cart/pages/CartPage.tsx
+                     Carrito de la tienda (/shop/:storeId/cart).
+                     Lista de ítems + tarjeta de resumen. Auto-limpia productos eliminados.
+CartRow            — (dentro de CartPage)
+                     Fila de ítem: miniatura clickeable, nombre clickeable, precio unitario "c/u",
+                     badge "Agotado" si aplica, QuantityStepper, subtotal, botón papelera "quitar".
+CartSummary        — (dentro de CartPage)
+                     Tarjeta "Resumen" pegajosa a la derecha: Subtotal, Envío ("A coordinar con la
+                     tienda"), línea divisoria + Total, botón primario "Ir a pagar", botón
+                     "Seguir comprando".
+CheckoutModal      — (dentro de CartPage)
+                     Modal "Finalizar compra" (stub): ícono de alerta + texto explicando que es un
+                     prototipo sin pasarela de pagos + resumen del pedido + botón "Entendido".
+CartEmptyState     — (dentro de CartPage)
+                     Pantalla "Tu carrito está vacío" con botón "Ver catálogo".
+
+--------------------------------------------------------------------------------
+2. MÓDULO COMERCIANTE — PANEL PRIVADO (rutas /, /stores/...)
+--------------------------------------------------------------------------------
+
+PÁGINAS:
+StoresListPage     — src/features/merchant/stores/pages/StoresListPage.tsx
+                     Home del comerciante (/). Contenedor multi-tienda: título "Mis tiendas",
+                     botón "Crear tienda", grid de StoreCard (2 col), estado vacío "Aún no tienes
+                     tiendas" y footer "Prototipo funcional — los datos se guardan en este navegador".
+MerchantHeader     — src/features/merchant/stores/components/MerchantHeader.tsx
+                     Barra superior del panel: caja con ícono de tienda + marca "CreaTienda"
+                     (clic = home) + ThemeToggle.
+CreateStorePage    — src/features/merchant/stores/pages/CreateStorePage.tsx
+                     Formulario "Nueva tienda" centrado (/stores/new). Al crear, redirige al
+                     dashboard de la tienda.
+
+StoreDashboardLayout — src/features/merchant/stores/layouts/StoreDashboardLayout.tsx
+                     Marco del panel de una tienda (/stores/:storeId/*).
+Sidebar            — (dentro de StoreDashboardLayout)
+                     Columna izquierda (arriba en móvil): link "Tiendas" con flecha + ThemeToggle,
+                     nombre de la tienda + rótulo "Panel del comerciante", menú vertical con 5 ítems
+                     (ítem activo = relleno invertido):
+                       Resumen (IconDashboard)   → /stores/:storeId
+                       Productos (IconPackage)   → /stores/:storeId/products
+                       Inventario (IconBoxes)    → /stores/:storeId/inventory
+                       Estadísticas (IconChart)  → /stores/:storeId/statistics
+                       Ajustes (IconSettings)    → /stores/:storeId/settings
+                     Abajo: botón "Ver tienda pública" (abre /shop/:storeId en pestaña nueva).
+
+StoreOverviewPage  — src/features/merchant/stores/pages/StoreOverviewPage.tsx
+                     Resumen de la tienda (índice del dashboard): título + descripción, botones
+                     "Nuevo producto" y "Ver tienda", 4 StatTile (Productos, Publicados, Sin stock,
+                     Valor de inventario) y tarjeta "Productos recientes" (4 últimos con miniatura,
+                     badge Publicado/Oculto y precio, link "Ver todos").
+
+ProductsPage       — src/features/merchant/admin/pages/ProductsPage.tsx
+                     Gestión de productos (/stores/:storeId/products).
+                     Header: título con contador + botón "Nuevo producto".
+                     Buscador de productos (input con lupa).
+ProductRow         — (dentro de ProductsPage)
+                     Fila: miniatura, nombre + descripción (2 líneas), columna precio y "Stock: N",
+                     badges (Publicado / Oculto / Agotado), y acciones:
+                       PublicarUOcultar (check/x), Editar (lápiz), Eliminar (papelera),
+                       VerEnTienda (ícono externo, pestaña nueva).
+ProductDeleteDialog— (dentro de ProductsPage)
+                     ConfirmDialog "Eliminar producto" (pregunta con nombre, "Eliminar"/"Cancelar").
+                     ProductosPage también tiene estado vacío "Esta tienda no tiene productos".
+
+ProductFormPage    — src/features/merchant/admin/pages/ProductFormPage.tsx
+                     Página contenedora de alta/edición (/products/new y /products/:productId).
+                     Título "Nuevo producto" o "Editar: <nombre>", subtítulo con tienda y moneda;
+                     maneja guardado, toasts y redirección.
+ProductForm        — src/features/merchant/admin/components/ProductForm.tsx
+                     Formulario de producto: campos #product-name (Nombre*), #product-description
+                     (Descripción), #product-price (Precio*), #product-stock (Stock), validaciones
+                     en línea, y switch "Publicar en la tienda" (ON por defecto). Botones:
+                     "Crear producto"/"Guardar cambios" y "Cancelar".
+ImageUploader      — src/features/merchant/admin/components/ImageUploader.tsx
+                     Subida de fotos (máx. 12): carrusel de miniaturas cuadradas con botón X para
+                     quitar, etiqueta "Portada" en la primera, casilla punteada "Agregar", y botón
+                     "Subir fotos del producto" si está vacío. Optimiza imágenes (canvas→JPEG) y
+                     avisa errores por toast.
+
+InventoryPage      — src/features/merchant/admin/pages/InventoryPage.tsx
+                     Control de inventario (/stores/:storeId/inventory): buscador, botón filtro
+                     "Stock bajo o agotado", tabla con columnas Producto / Estado / Precio / Stock /
+                     Valor.
+InventoryRow       — (dentro de InventoryPage, componente real "InventoryRow")
+                     Fila de la tabla: miniatura, nombre, badges de estado (Agotado / Stock bajo /
+                     Disponible), precio, valor total (precio x stock) y su editor de stock:
+                     input numérico que guarda al perder foco o presionar Enter
+                     (toast "Stock de ... actualizado a N"). Umbral "stock bajo" = LOW_STOCK_THRESHOLD.
+
+SettingsPage       — src/features/merchant/admin/pages/SettingsPage.tsx
+                     Ajustes de la tienda (/stores/:storeId/settings):
+                       StoreForm (reutilizado): nombre, descripción, moneda, logo + "Guardar cambios".
+                       Tarjeta "Enlace público de la tienda": URL /shop/:id + botón "Copiar".
+                       Zona de peligro (tarjeta punteada) "Eliminar tienda" con botón
+                       `Eliminar «nombre»` → EliminateStoreDialog (ConfirmDialog
+                       "¿Eliminar tienda definitivamente?", "Sí, eliminar"; borra en cascada
+                       productos y carrito y vuelve a "Mis tiendas").
+
+StatisticsPage     — src/features/merchant/statistics/pages/StatisticsPage.tsx
+                     STUB (no desarrollar aún): "Módulo en desarrollo" + lista de badges
+                     "Funcionalidades reservadas" (ventas por período, más vendidos, más visitados,
+                     horarios, XLSX, gráficas) + link "Volver al resumen".
+
+--------------------------------------------------------------------------------
+3. DESIGN SYSTEM (shared/ui) — bloques reutilizables de la GUI
+--------------------------------------------------------------------------------
+Button             — src/shared/ui/Button.tsx       — Botón. Variantes: primary (negro/blanco invertido),
+                     outline (borde, relleno invertido al hover), ghost (sin borde). Tamaños sm/md/lg.
+                     Exporta también buttonClasses() para dar estilo de botón a enlaces <Link>.
+Card               — src/shared/ui/Card.tsx         — Tarjeta blanca/gris con borde y esquinas redondeadas.
+Input              — src/shared/ui/Input.tsx        — Campo de texto de una línea con borde y focus ring.
+Textarea           — src/shared/ui/Textarea.tsx     — Campo de texto multilínea (mín. 6 líneas).
+Select             — src/shared/ui/Select.tsx       — Menú desplegable nativo con estilo del sistema.
+Label              — src/shared/ui/Label.tsx        — Rótulo de formulario.
+Badge              — src/shared/ui/Badge.tsx        — Etiqueta/píldora pequeña. Variantes: outline,
+                     solid (invertida), muted (gris). Usada para: Publicado, Oculto, Agotado,
+                     Stock bajo, Disponible, Últimas unidades, moneda.
+Modal              — src/shared/ui/Modal.tsx        — Ventana modal centrada con oscurecido del fondo,
+                     título, X de cierre, cierre con Esc o clic fuera, y zona de botones (footer).
+ConfirmDialog      — src/shared/ui/ConfirmDialog.tsx— Modal de confirmación estándar ("Cancelar" + un
+                     botón de acción). Usada por: eliminar producto y eliminar tienda.
+EmptyState         — src/shared/ui/EmptyState.tsx   — Panel punteado de "nada que mostrar": ícono,
+                     título, descripción y acción opcional.
+QuantityStepper    — src/shared/ui/QuantityStepper.tsx — Selector de cantidad "− / campo / +" con min/max.
+                     Usado en: detalle de producto y filas del carrito.
+ThemeToggle        — src/shared/ui/ThemeToggle.tsx  — Botón cuadrado sol/luna que alterna modo claro
+                     (blanco/negro) y oscuro (gris/blanco). Persiste preferencia. Aparece en: header
+                     comerciante, sidebar del dashboard y header de la tienda pública.
+Toaster / Toast    — src/shared/ui/Toaster.tsx      — Avisos flotantes abajo-derecha ("Producto creado",
+                     "agregado al carrito", etc.), con check, X y auto-cierre a los 3.2 s.
+Iconos             — src/shared/ui/icons.tsx        — 22 íconos SVG de línea: IconSun, IconMoon,
+                     IconCart, IconPlus, IconMinus, IconTrash, IconPencil, IconExternal,
+                     IconChevronLeft, IconChevronRight, IconImage, IconCheck, IconX, IconStore,
+                     IconChart, IconPackage, IconSettings, IconArrowLeft, IconSearch, IconDashboard,
+                     IconBoxes, IconAlert.
+
+--------------------------------------------------------------------------------
+4. STORES DE ESTADO (Zustand) — para nombrar lógica en prompts
+--------------------------------------------------------------------------------
+storesStore        — src/store/storesStore.ts       — Lista de tiendas del comerciante + crear /
+                     actualizar / eliminar (eliminación en cascada de productos y carritos).
+productsStore      — src/store/productsStore.ts     — Catálogo global de productos; acciones de alta,
+                     edición (incluye publicar y cambiar stock) y borrado.
+cartStore          — src/store/cartStore.ts         — Carritos AISLADOS por tienda (itemsByStore);
+                     addItem, setQuantity, removeItem, clearStore. Persiste en localStorage.
+uiStore            — src/store/uiStore.ts           — Tema (light/dark) y cola de toasts.
+hooks de datos     — src/shared/hooks/useScopedData — useStoreById, useProductsByStore, useProductById,
+                     useProductCountByStore (filtrado multi-tienda por storeId).
+
+--------------------------------------------------------------------------------
+5. CAPA DE DATOS (repositorios, aún sin backend)
+--------------------------------------------------------------------------------
+localStorageAdapter— src/data/storage/localStorageAdapter.ts — Lectura/escritura JSON con prefijo
+                     "creatienda:"; error amigable si se llena la cuota.
+repository.ts      — src/data/repositories/repository.ts — Repository<T> genérico (findAll, findById,
+                     create, update, remove, removeWhere); futuro reemplazo por API real.
+storeRepository    — src/data/repositories/storeRepository.ts     — Tiendas (clave "creatienda:stores").
+productRepository  — src/data/repositories/productRepository.ts   — Productos (clave "creatienda:products").
+seed.ts            — src/data/seed.ts               — Estado inicial: el sistema arranca VACÍO.
+Tipos de dominio   — src/shared/types/domain.ts     — Store, NewStore, Product, NewProduct, CartItem.
+Utilidades         — src/shared/utils/              — cn (clases CSS), id (generateId),
+                     format (formatPrice, formatDate, parsePrice, parseStock),
+                     image (fileToDataUrl, fileToOptimizedDataUrl con canvas).
+Constantes         — src/config/constants.ts        — APP_NAME "CreaTienda", DEFAULT_CURRENCY USD,
+                     LOW_STOCK_THRESHOLD 5, lista CURRENCIES (USD, EUR, MXN, COP, ARS...).
+
+================================================================================
+ EJEMPLO DE USO EN PROMPTS:
+   "En ProductCard (catálogo cliente) agrega el stock como texto bajo el precio."
+   "Cambia el StorefrontHeader para que el nombre de tienda enlace al catálogo."
+   "En ImageUploader (admin de producto) permite reordenar las fotos."
+   "Modifica InventoryRow (InventoryPage) para validar que el stock no sea negativo."
+================================================================================
