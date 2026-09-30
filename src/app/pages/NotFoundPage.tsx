@@ -5,7 +5,7 @@ import { IconAlert } from '@/shared/ui/icons'
 
 export function NotFoundPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center p-6">
+    <div className="flex min-h-[100dvh] items-center justify-center p-6">
       <EmptyState
         icon={<IconAlert width={28} height={28} />}
         title="Página no encontrada"

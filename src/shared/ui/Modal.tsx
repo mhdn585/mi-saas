@@ -27,7 +27,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
       <div
         role="dialog"
         aria-modal="true"
-        className="animate-fade-up relative w-full max-w-md rounded-lg border border-line bg-surface p-5 shadow-lg"
+        className="animate-fade-up relative w-full max-w-md overscroll-y-contain rounded-lg border border-line bg-surface p-5 shadow-lg"
       >
         <div className="mb-3 flex items-start justify-between gap-4">
           {title ? <h2 className="text-base font-semibold">{title}</h2> : <span />}

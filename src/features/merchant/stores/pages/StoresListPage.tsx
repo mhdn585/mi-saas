@@ -11,7 +11,7 @@ export function StoresListPage() {
   const stores = useStoresStore((state) => state.stores)
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-[100dvh] flex-col">
       <MerchantHeader />
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
         <div className="mb-8 flex flex-wrap items-end justify-between gap-4">

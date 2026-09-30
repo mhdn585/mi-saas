@@ -11,7 +11,7 @@ export function CreateStorePage() {
   const showToast = useUIStore((state) => state.showToast)
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-[100dvh] flex-col">
       <MerchantHeader />
       <main className="mx-auto w-full max-w-lg flex-1 px-4 py-10">
         <Card className="p-6">

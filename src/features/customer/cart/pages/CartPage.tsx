@@ -146,7 +146,7 @@ export function CartPage() {
                   showToast(`"${product.name}" quitado del carrito`)
                 }}
               >
-                <IconTrash />
+                <IconTrash width={20} height={20} />
               </Button>
             </div>
           ))}

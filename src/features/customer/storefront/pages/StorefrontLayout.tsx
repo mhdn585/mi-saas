@@ -16,7 +16,7 @@ export function StorefrontLayout() {
 
   if (!store) {
     return (
-      <div className="flex min-h-screen items-center justify-center p-6">
+      <div className="flex min-h-[100dvh] items-center justify-center p-6">
         <EmptyState
           icon={<IconStore width={28} height={28} />}
           title="Tienda no disponible"
@@ -32,7 +32,7 @@ export function StorefrontLayout() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-[100dvh] flex-col">
       <header className="sticky top-0 z-40 border-b border-line bg-bg/90 backdrop-blur">
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4">
           <Link to="." className="flex min-w-0 items-center gap-2 font-semibold">

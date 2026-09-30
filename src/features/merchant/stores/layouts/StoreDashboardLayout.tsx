@@ -28,7 +28,7 @@ export function StoreDashboardLayout() {
 
   if (!store) {
     return (
-      <div className="flex min-h-screen items-center justify-center p-6">
+      <div className="flex min-h-[100dvh] items-center justify-center p-6">
         <EmptyState
           title="Tienda no encontrada"
           description="La tienda que buscas no existe o fue eliminada."
@@ -43,7 +43,7 @@ export function StoreDashboardLayout() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col md:flex-row">
+    <div className="flex min-h-[100dvh] flex-col md:flex-row">
       <aside className="flex shrink-0 flex-col border-b border-line md:sticky md:top-0 md:h-screen md:w-64 md:overflow-y-auto md:border-b-0 md:border-r">
         <div className="flex items-center justify-between gap-2 border-b border-line p-3">
           <Link
