@@ -1,12 +1,21 @@
 import type { HTMLAttributes } from 'react'
 import { cn } from '@/shared/utils/cn'
 
-type BadgeVariant = 'outline' | 'solid' | 'muted'
+type BadgeVariant =
+  | 'outline'
+  | 'solid'
+  | 'muted'
+  | 'success'
+  | 'danger'
+  | 'warning'
 
 const variants: Record<BadgeVariant, string> = {
   outline: 'border-line bg-transparent text-fg',
   solid: 'border-line bg-accent text-accent-fg',
   muted: 'border-transparent bg-fg/10 text-muted',
+  success: 'border-success/40 bg-success/10 text-success',
+  danger: 'border-danger/40 bg-danger/10 text-danger',
+  warning: 'border-warning/40 bg-warning/10 text-warning',
 }
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {

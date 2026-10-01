@@ -6,8 +6,8 @@ import { Label } from '@/shared/ui/Label'
 import { Select } from '@/shared/ui/Select'
 import { Textarea } from '@/shared/ui/Textarea'
 import { IconImage, IconX } from '@/shared/ui/icons'
+import { mediaUrl, uploadMedia } from '@/data/api/client'
 import { useUIStore } from '@/store/uiStore'
-import { fileToOptimizedDataUrl } from '@/shared/utils/image'
 
 export interface StoreFormValues {
   name: string
@@ -19,33 +19,43 @@ export interface StoreFormValues {
 interface StoreFormProps {
   initial?: Partial<StoreFormValues>
   submitLabel: string
+  busy?: boolean
   onSubmit: (values: StoreFormValues) => void
   onCancel?: () => void
 }
 
-export function StoreForm({ initial, submitLabel, onSubmit, onCancel }: StoreFormProps) {
+export function StoreForm({ initial, submitLabel, busy = false, onSubmit, onCancel }: StoreFormProps) {
   const [name, setName] = useState(initial?.name ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [currency, setCurrency] = useState(initial?.currency ?? DEFAULT_CURRENCY)
   const [logo, setLogo] = useState<string | null>(initial?.logo ?? null)
   const [nameError, setNameError] = useState('')
+  const [uploadingLogo, setUploadingLogo] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const showToast = useUIStore((state) => state.showToast)
 
   const handleLogoFile = async (file: File | undefined) => {
     if (!file) return
     if (!file.type.startsWith('image/')) {
-      showToast('El archivo debe ser una imagen')
+      showToast('El archivo debe ser una imagen', 'error')
       return
     }
+    setUploadingLogo(true)
     try {
-      setLogo(await fileToOptimizedDataUrl(file, 256, 0.9))
-    } catch {
-      showToast('No se pudo cargar el logo')
+      const result = await uploadMedia(file)
+      setLogo(mediaUrl(result.url))
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : 'No se pudo subir el logo',
+        'error',
+      )
+    } finally {
+      setUploadingLogo(false)
     }
   }
 
   const handleSubmit = () => {
+    if (busy) return
     const trimmed = name.trim()
     if (!trimmed) {
       setNameError('El nombre de la tienda es obligatorio')
@@ -79,7 +89,7 @@ export function StoreForm({ initial, submitLabel, onSubmit, onCancel }: StoreFor
             setNameError('')
           }}
         />
-        {nameError ? <p className="mt-1 text-xs">{nameError}</p> : null}
+        {nameError ? <p className="mt-1 text-xs text-danger">{nameError}</p> : null}
       </div>
 
       <div>
@@ -143,17 +153,20 @@ export function StoreForm({ initial, submitLabel, onSubmit, onCancel }: StoreFor
               variant="outline"
               size="md"
               className="border-dashed"
+              disabled={uploadingLogo}
               onClick={() => fileInputRef.current?.click()}
             >
               <IconImage />
-              Subir logo
+              {uploadingLogo ? 'Subiendo…' : 'Subir logo'}
             </Button>
           )}
         </div>
       </div>
 
       <div className="mt-2 flex gap-2">
-        <Button type="submit">{submitLabel}</Button>
+        <Button type="submit" disabled={busy}>
+          {submitLabel}
+        </Button>
         {onCancel ? (
           <Button type="button" variant="outline" onClick={onCancel}>
             Cancelar

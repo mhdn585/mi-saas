@@ -7,7 +7,8 @@ import { EmptyState } from '@/shared/ui/EmptyState'
 import { Modal } from '@/shared/ui/Modal'
 import { IconAlert, IconCart, IconImage, IconTrash } from '@/shared/ui/icons'
 import { QuantityStepper } from '@/shared/ui/QuantityStepper'
-import { useStoreById } from '@/shared/hooks/useScopedData'
+import { Spinner } from '@/shared/ui/Spinner'
+import { useProductsStatus, useStoreById } from '@/shared/hooks/useScopedData'
 import { useCartItems, useCartStore } from '@/store/cartStore'
 import { useProductsStore } from '@/store/productsStore'
 import { useUIStore } from '@/store/uiStore'
@@ -24,6 +25,7 @@ export function CartPage() {
   const store = useStoreById(storeId)
   const items = useCartItems(storeId)
   const products = useProductsStore((state) => state.products)
+  const { loading, loaded } = useProductsStatus(storeId)
   const setQuantity = useCartStore((state) => state.setQuantity)
   const removeItem = useCartStore((state) => state.removeItem)
   const showToast = useUIStore((state) => state.showToast)
@@ -40,15 +42,18 @@ export function CartPage() {
   }, [items, products, storeId])
 
   useEffect(() => {
-    if (!storeId) return
+    // Solo limpiar cuando los productos ya vinieron del servidor:
+    // con la lista aún vacía se borraría el carrito entero.
+    if (!storeId || !loaded) return
     for (const item of items) {
       if (!products.some((product) => product.id === item.productId)) {
         removeItem(storeId, item.productId)
       }
     }
-  }, [items, products, removeItem, storeId])
+  }, [items, products, removeItem, storeId, loaded])
 
   if (!store) return null
+  if (loading && !loaded) return <Spinner className="py-16" />
 
   const total = entries.reduce(
     (sum, entry) => sum + entry.product.price * entry.item.quantity,
@@ -57,7 +62,7 @@ export function CartPage() {
 
   const handleQuantity = (entry: CartEntry, next: number) => {
     if (next > entry.product.stock) {
-      showToast(`Solo hay ${entry.product.stock} unidades disponibles`)
+      showToast(`Solo hay ${entry.product.stock} unidades disponibles`, 'warning')
       return
     }
     setQuantity(store.id, entry.product.id, next)
@@ -118,7 +123,7 @@ export function CartPage() {
                 <p className="text-xs text-muted">
                   {formatPrice(product.price, store.currency)} c/u
                   {product.stock === 0 ? (
-                    <Badge variant="solid" className="ml-2 align-middle">
+                    <Badge variant="danger" className="ml-2 align-middle">
                       Agotado
                     </Badge>
                   ) : null}

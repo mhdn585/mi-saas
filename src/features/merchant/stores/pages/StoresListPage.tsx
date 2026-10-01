@@ -2,13 +2,17 @@ import { Link } from 'react-router-dom'
 import { APP_NAME } from '@/config/constants'
 import { MerchantHeader } from '../components/MerchantHeader'
 import { StoreCard } from '../components/StoreCard'
-import { buttonClasses } from '@/shared/ui/Button'
+import { Button, buttonClasses } from '@/shared/ui/Button'
 import { EmptyState } from '@/shared/ui/EmptyState'
-import { IconPlus, IconStore } from '@/shared/ui/icons'
+import { Spinner } from '@/shared/ui/Spinner'
+import { IconAlert, IconPlus, IconStore } from '@/shared/ui/icons'
+import { useStoresStatus } from '@/shared/hooks/useScopedData'
 import { useStoresStore } from '@/store/storesStore'
 
 export function StoresListPage() {
   const stores = useStoresStore((state) => state.stores)
+  const load = useStoresStore((state) => state.load)
+  const { loading, loaded, error } = useStoresStatus()
 
   return (
     <div className="flex min-h-[100dvh] flex-col">
@@ -28,18 +32,33 @@ export function StoresListPage() {
           </Link>
         </div>
 
-        {stores.length === 0 ? (
-          <EmptyState
-            icon={<IconStore width={28} height={28} />}
-            title="Aún no tienes tiendas"
-            description="Crea tu primera tienda online y empieza a publicar productos en minutos."
-            action={
-              <Link to="/stores/new" className={buttonClasses('primary', 'md')}>
-                <IconPlus />
-                Crear mi primera tienda
-              </Link>
-            }
-          />
+        {loading && !loaded ? (
+          <Spinner className="py-16" />
+        ) : stores.length === 0 ? (
+          error ? (
+            <EmptyState
+              icon={<IconAlert width={24} height={24} />}
+              title="No se pudo conectar con el servidor"
+              description={error}
+              action={
+                <Button onClick={() => void load({ force: true })}>
+                  Reintentar
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              icon={<IconStore width={28} height={28} />}
+              title="Aún no tienes tiendas"
+              description="Crea tu primera tienda online y empieza a publicar productos en minutos."
+              action={
+                <Link to="/stores/new" className={buttonClasses('primary', 'md')}>
+                  <IconPlus />
+                  Crear mi primera tienda
+                </Link>
+              }
+            />
+          )
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             {stores.map((store) => (
@@ -49,7 +68,7 @@ export function StoresListPage() {
         )}
       </main>
       <footer className="border-t border-line py-4 text-center text-xs text-muted">
-        Prototipo funcional — los datos se guardan en este navegador
+        Datos servidos por la API de {APP_NAME} (Flask + SQLAlchemy)
       </footer>
     </div>
   )

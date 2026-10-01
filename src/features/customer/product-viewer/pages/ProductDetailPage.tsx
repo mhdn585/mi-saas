@@ -6,7 +6,12 @@ import { Button } from '@/shared/ui/Button'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { IconAlert, IconCart, IconChevronLeft } from '@/shared/ui/icons'
 import { QuantityStepper } from '@/shared/ui/QuantityStepper'
-import { useProductById, useStoreById } from '@/shared/hooks/useScopedData'
+import { Spinner } from '@/shared/ui/Spinner'
+import {
+  useProductById,
+  useProductsStatus,
+  useStoreById,
+} from '@/shared/hooks/useScopedData'
 import { useCartItems, useCartStore } from '@/store/cartStore'
 import { useUIStore } from '@/store/uiStore'
 import { formatPrice } from '@/shared/utils/format'
@@ -15,12 +20,16 @@ export function ProductDetailPage() {
   const { storeId, productId } = useParams<{ storeId: string; productId: string }>()
   const store = useStoreById(storeId)
   const product = useProductById(storeId, productId)
+  const { loading, loaded } = useProductsStatus(storeId)
   const cartItems = useCartItems(storeId)
   const addItem = useCartStore((state) => state.addItem)
   const showToast = useUIStore((state) => state.showToast)
   const [quantity, setQuantity] = useState(1)
 
-  if (!store || !product) {
+  if (!store) return null
+  if (!product && loading && !loaded) return <Spinner className="py-16" />
+
+  if (!product) {
     return (
       <EmptyState
         icon={<IconAlert width={24} height={24} />}
@@ -67,10 +76,10 @@ export function ProductDetailPage() {
 
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
             {soldOut ? (
-              <Badge variant="solid">Agotado</Badge>
+              <Badge variant="danger">Agotado</Badge>
             ) : (
               <>
-                <Badge variant="outline">{product.stock} disponibles</Badge>
+                <Badge variant="success">{product.stock} disponibles</Badge>
                 {inCart > 0 ? (
                   <span>{inCart} en tu carrito</span>
                 ) : null}

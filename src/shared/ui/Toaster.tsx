@@ -1,6 +1,24 @@
 import { useEffect } from 'react'
-import { useUIStore, type Toast } from '@/store/uiStore'
-import { IconCheck, IconX } from './icons'
+import { useUIStore, type Toast, type ToastTone } from '@/store/uiStore'
+import { IconAlert, IconCheck, IconCircleX, IconX } from './icons'
+
+const toneStyles: Record<ToastTone, { container: string; Icon: typeof IconCheck }> = {
+  success: {
+    container:
+      'border-success/40 bg-[color-mix(in_srgb,rgb(var(--success))_10%,rgb(var(--surface)))] text-success',
+    Icon: IconCheck,
+  },
+  error: {
+    container:
+      'border-danger/40 bg-[color-mix(in_srgb,rgb(var(--danger))_10%,rgb(var(--surface)))] text-danger',
+    Icon: IconCircleX,
+  },
+  warning: {
+    container:
+      'border-warning/40 bg-[color-mix(in_srgb,rgb(var(--warning))_12%,rgb(var(--surface)))] text-warning',
+    Icon: IconAlert,
+  },
+}
 
 export function Toaster() {
   const toasts = useUIStore((state) => state.toasts)
@@ -21,10 +39,16 @@ function ToastItem({ toast, onDone }: { toast: Toast; onDone: (id: number) => vo
     return () => window.clearTimeout(timer)
   }, [toast.id, onDone])
 
+  const { container, Icon } = toneStyles[toast.tone ?? 'success']
+
   return (
-    <div className="animate-fade-up flex items-center justify-between gap-3 rounded-md border border-line bg-surface px-3 py-2 text-sm shadow-lg">
+    <div
+      role="status"
+      aria-live={toast.tone === 'error' ? 'assertive' : 'polite'}
+      className={`animate-fade-up flex items-center justify-between gap-3 rounded-md border bg-surface px-3 py-2 text-sm shadow-lg ${container}`}
+    >
       <span className="flex items-center gap-2">
-        <IconCheck className="shrink-0" />
+        <Icon className="shrink-0" />
         {toast.message}
       </span>
       <button

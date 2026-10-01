@@ -20,11 +20,12 @@ export interface ProductFormValues {
 interface ProductFormProps {
   initial?: Product | null
   submitLabel: string
+  busy?: boolean
   onSubmit: (values: ProductFormValues) => void
   onCancel: () => void
 }
 
-export function ProductForm({ initial, submitLabel, onSubmit, onCancel }: ProductFormProps) {
+export function ProductForm({ initial, submitLabel, busy = false, onSubmit, onCancel }: ProductFormProps) {
   const [name, setName] = useState(initial?.name ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [price, setPrice] = useState(initial ? String(initial.price) : '')
@@ -34,6 +35,7 @@ export function ProductForm({ initial, submitLabel, onSubmit, onCancel }: Produc
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const handleSubmit = () => {
+    if (busy) return
     const nextErrors: Record<string, string> = {}
     const trimmedName = name.trim()
     const parsedPrice = parsePrice(price)
@@ -73,7 +75,7 @@ export function ProductForm({ initial, submitLabel, onSubmit, onCancel }: Produc
           placeholder="Ej.: Pan de campo 500g"
           onChange={(event) => setName(event.target.value)}
         />
-        {errors.name ? <p className="mt-1 text-xs">{errors.name}</p> : null}
+        {errors.name ? <p className="mt-1 text-xs text-danger">{errors.name}</p> : null}
       </div>
 
       <div>
@@ -97,7 +99,7 @@ export function ProductForm({ initial, submitLabel, onSubmit, onCancel }: Produc
             placeholder="0.00"
             onChange={(event) => setPrice(event.target.value)}
           />
-          {errors.price ? <p className="mt-1 text-xs">{errors.price}</p> : null}
+          {errors.price ? <p className="mt-1 text-xs text-danger">{errors.price}</p> : null}
         </div>
         <div>
           <Label htmlFor="product-stock">Stock disponible</Label>
@@ -107,7 +109,7 @@ export function ProductForm({ initial, submitLabel, onSubmit, onCancel }: Produc
             value={stock}
             onChange={(event) => setStock(event.target.value)}
           />
-          {errors.stock ? <p className="mt-1 text-xs">{errors.stock}</p> : null}
+          {errors.stock ? <p className="mt-1 text-xs text-danger">{errors.stock}</p> : null}
         </div>
       </div>
 
@@ -141,7 +143,7 @@ export function ProductForm({ initial, submitLabel, onSubmit, onCancel }: Produc
       </Card>
 
       <div className="mt-2 flex gap-2">
-        <Button type="submit">{submitLabel}</Button>
+        <Button type="submit" disabled={busy}>{submitLabel}</Button>
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancelar
         </Button>

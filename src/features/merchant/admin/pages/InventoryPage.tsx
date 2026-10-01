@@ -6,7 +6,8 @@ import { Card } from '@/shared/ui/Card'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { Input } from '@/shared/ui/Input'
 import { IconBoxes, IconImage, IconSearch } from '@/shared/ui/icons'
-import { useProductsByStore, useStoreById } from '@/shared/hooks/useScopedData'
+import { useProductsByStore, useProductsStatus, useStoreById } from '@/shared/hooks/useScopedData'
+import { Spinner } from '@/shared/ui/Spinner'
 import { formatPrice, parseStock } from '@/shared/utils/format'
 import { LOW_STOCK_THRESHOLD } from '@/config/constants'
 import { useProductsStore } from '@/store/productsStore'
@@ -17,6 +18,7 @@ export function InventoryPage() {
   const { storeId } = useParams<{ storeId: string }>()
   const store = useStoreById(storeId)
   const products = useProductsByStore(storeId)
+  const { loading, loaded } = useProductsStatus(storeId)
   const [query, setQuery] = useState('')
   const [onlyCritical, setOnlyCritical] = useState(false)
 
@@ -32,6 +34,7 @@ export function InventoryPage() {
   }, [products, query, onlyCritical])
 
   if (!store) return null
+  if (loading && !loaded) return <Spinner className="py-16" />
 
   return (
     <div className="flex flex-col gap-6">
@@ -104,26 +107,34 @@ function InventoryRow({ product, currency }: { product: Product; currency: strin
     setValue(String(product.stock))
   }, [product.stock])
 
-  const commit = () => {
+  const commit = async () => {
     const parsed = parseStock(value)
     if (parsed === null) {
       setValue(String(product.stock))
-      showToast('Valor de stock no válido')
+      showToast('Valor de stock no válido', 'error')
       return
     }
     if (parsed !== product.stock) {
-      updateProduct(product.id, { stock: parsed })
-      showToast(`Stock de "${product.name}" actualizado a ${parsed}`)
+      try {
+        await updateProduct(product.id, { stock: parsed })
+        showToast(`Stock de "${product.name}" actualizado a ${parsed}`)
+      } catch (error) {
+        setValue(String(product.stock))
+        showToast(
+          error instanceof Error ? error.message : 'No se pudo actualizar el stock',
+          'error',
+        )
+      }
     }
   }
 
   const stockBadge =
     product.stock === 0 ? (
-      <Badge variant="solid">Agotado</Badge>
+      <Badge variant="danger">Agotado</Badge>
     ) : product.stock <= LOW_STOCK_THRESHOLD ? (
-      <Badge variant="outline">Stock bajo</Badge>
+      <Badge variant="warning">Stock bajo</Badge>
     ) : (
-      <Badge variant="muted">Disponible</Badge>
+      <Badge variant="success">Disponible</Badge>
     )
 
   return (

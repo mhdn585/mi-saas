@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { StoreForm } from '@/features/merchant/stores/components/StoreForm'
+import type { StoreFormValues } from '@/features/merchant/stores/components/StoreForm'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
@@ -18,6 +19,7 @@ export function SettingsPage() {
   const deleteStore = useStoresStore((state) => state.deleteStore)
   const showToast = useUIStore((state) => state.showToast)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   if (!store) {
     return (
@@ -32,6 +34,34 @@ export function SettingsPage() {
   }
 
   const publicUrl = `${window.location.origin}/shop/${store.id}`
+
+  const handleSave = async (values: StoreFormValues) => {
+    setSaving(true)
+    try {
+      await updateStore(store.id, values)
+      showToast('Tienda actualizada')
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : 'No se pudo guardar la tienda',
+        'error',
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    try {
+      await deleteStore(store.id)
+      showToast(`Tienda "${store.name}" eliminada`)
+      navigate('/')
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : 'No se pudo eliminar la tienda',
+        'error',
+      )
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -51,10 +81,10 @@ export function SettingsPage() {
             currency: store.currency,
             logo: store.logo,
           }}
-          submitLabel="Guardar cambios"
+          submitLabel={saving ? 'Guardando…' : 'Guardar cambios'}
+          busy={saving}
           onSubmit={(values) => {
-            updateStore(store.id, values)
-            showToast('Tienda actualizada')
+            void handleSave(values)
           }}
         />
       </Card>
@@ -77,7 +107,7 @@ export function SettingsPage() {
               void navigator.clipboard
                 .writeText(publicUrl)
                 .then(() => showToast('Enlace copiado al portapapeles'))
-                .catch(() => showToast('No se pudo copiar el enlace'))
+                .catch(() => showToast('No se pudo copiar el enlace', 'error'))
             }}
           >
             Copiar
@@ -110,12 +140,10 @@ export function SettingsPage() {
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
         onConfirm={() => {
-          deleteStore(store.id)
-          showToast(`Tienda "${store.name}" eliminada`)
-          navigate('/')
+          void handleDelete()
         }}
         title="¿Eliminar tienda definitivamente?"
-        message={`Se eliminará "${store.name}" junto con todo su catálogo y estadísticas locales.`}
+        message={`Se eliminará "${store.name}" junto con todo su catálogo.`}
         confirmLabel="Sí, eliminar"
       />
     </div>

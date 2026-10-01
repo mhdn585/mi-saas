@@ -11,6 +11,11 @@
     --muted: 115 115 115;
     --accent: 10 10 10;
     --accent-fg: 255 255 255;
+    /* Colores semánticos: NO forman parte de la paleta del proyecto.
+       Solo resaltan sucesos del sistema (verde OK, rojo error, ámbar aviso). */
+    --success: 21 128 61;
+    --danger: 220 38 38;
+    --warning: 180 83 9;
   }
 
   .dark {
@@ -21,6 +26,9 @@
     --muted: 155 155 155;
     --accent: 245 245 245;
     --accent-fg: 24 24 24;
+    --success: 74 222 128;
+    --danger: 248 113 113;
+    --warning: 251 191 36;
   }
 
   html {

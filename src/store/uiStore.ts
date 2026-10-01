@@ -4,9 +4,12 @@ import { storageKey } from '@/data/storage/localStorageAdapter'
 
 export type Theme = 'light' | 'dark'
 
+export type ToastTone = 'success' | 'error' | 'warning'
+
 export interface Toast {
   id: number
   message: string
+  tone: ToastTone
 }
 
 interface UIState {
@@ -14,7 +17,7 @@ interface UIState {
   toasts: Toast[]
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
-  showToast: (message: string) => void
+  showToast: (message: string, tone?: ToastTone) => void
   dismissToast: (id: number) => void
 }
 
@@ -32,8 +35,10 @@ export const useUIStore = create<UIState>()(
       setTheme: (theme) => set({ theme }),
       toggleTheme: () =>
         set((state) => ({ theme: state.theme === 'dark' ? 'light' : 'dark' })),
-      showToast: (message) =>
-        set((state) => ({ toasts: [...state.toasts, { id: ++toastSeq, message }] })),
+      showToast: (message, tone = 'success') =>
+        set((state) => ({
+          toasts: [...state.toasts, { id: ++toastSeq, message, tone }],
+        })),
       dismissToast: (id) =>
         set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
     }),

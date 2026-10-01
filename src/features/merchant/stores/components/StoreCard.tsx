@@ -4,11 +4,14 @@ import { Badge } from '@/shared/ui/Badge'
 import { buttonClasses } from '@/shared/ui/Button'
 import { IconExternal, IconStore } from '@/shared/ui/icons'
 import { formatDate } from '@/shared/utils/format'
-import { useProductCountByStore } from '@/shared/hooks/useScopedData'
+import { useProductCountByStore, useProductsStatus } from '@/shared/hooks/useScopedData'
 import type { Store } from '@/shared/types/domain'
 
 export function StoreCard({ store }: { store: Store }) {
   const productCount = useProductCountByStore(store.id)
+  // En el listado no se cargan los productos de cada tienda: el conteo solo
+  // aparece si esa tienda ya se visitó (evita mostrar "Sin productos" falso).
+  const { loaded } = useProductsStatus(store.id)
 
   return (
     <Card className="flex h-full flex-col gap-3 p-4">
@@ -23,10 +26,14 @@ export function StoreCard({ store }: { store: Store }) {
         <div className="min-w-0">
           <h3 className="truncate font-semibold">{store.name}</h3>
           <p className="text-xs text-muted">
-            {productCount === 0
-              ? 'Sin productos'
-              : `${productCount} ${productCount === 1 ? 'producto' : 'productos'}`}
-            {' · '}
+            {loaded ? (
+              <>
+                {productCount === 0
+                  ? 'Sin productos'
+                  : `${productCount} ${productCount === 1 ? 'producto' : 'productos'}`}
+                {' · '}
+              </>
+            ) : null}
             Creada el {formatDate(store.createdAt)}
           </p>
         </div>

@@ -7,7 +7,8 @@ import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { Input } from '@/shared/ui/Input'
 import { IconCheck, IconExternal, IconImage, IconPackage, IconPencil, IconPlus, IconSearch, IconTrash, IconX } from '@/shared/ui/icons'
-import { useProductsByStore, useStoreById } from '@/shared/hooks/useScopedData'
+import { useProductsByStore, useProductsStatus, useStoreById } from '@/shared/hooks/useScopedData'
+import { Spinner } from '@/shared/ui/Spinner'
 import { formatPrice } from '@/shared/utils/format'
 import { useProductsStore } from '@/store/productsStore'
 import { useUIStore } from '@/store/uiStore'
@@ -17,11 +18,13 @@ export function ProductsPage() {
   const { storeId } = useParams<{ storeId: string }>()
   const store = useStoreById(storeId)
   const products = useProductsByStore(storeId)
+  const { loading, loaded } = useProductsStatus(storeId)
   const updateProduct = useProductsStore((state) => state.updateProduct)
   const removeProduct = useProductsStore((state) => state.removeProduct)
   const showToast = useUIStore((state) => state.showToast)
   const [query, setQuery] = useState('')
   const [pendingDelete, setPendingDelete] = useState<Product | null>(null)
+  const [busyId, setBusyId] = useState('')
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -34,7 +37,40 @@ export function ProductsPage() {
     )
   }, [products, query])
 
+  const togglePublished = async (product: Product) => {
+    setBusyId(product.id)
+    try {
+      await updateProduct(product.id, { published: !product.published })
+      showToast(
+        product.published
+          ? `"${product.name}" ocultada`
+          : `"${product.name}" publicada`,
+      )
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : 'No se pudo actualizar el producto',
+        'error',
+      )
+    } finally {
+      setBusyId('')
+    }
+  }
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return
+    try {
+      await removeProduct(pendingDelete.id)
+      showToast(`"${pendingDelete.name}" eliminado`)
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : 'No se pudo eliminar el producto',
+        'error',
+      )
+    }
+  }
+
   if (!store) return null
+  if (loading && !loaded) return <Spinner className="py-16" />
 
   return (
     <div className="flex flex-col gap-6">
@@ -109,11 +145,11 @@ export function ProductsPage() {
 
                   <div className="flex flex-wrap justify-end gap-1">
                     {product.published ? (
-                      <Badge variant="outline">Publicado</Badge>
+                      <Badge variant="success">Publicado</Badge>
                     ) : (
                       <Badge variant="muted">Oculto</Badge>
                     )}
-                    {product.stock === 0 ? <Badge variant="solid">Agotado</Badge> : null}
+                    {product.stock === 0 ? <Badge variant="danger">Agotado</Badge> : null}
                   </div>
 
                   <div className="flex shrink-0 items-center gap-1">
@@ -122,13 +158,9 @@ export function ProductsPage() {
                       size="sm"
                       title={product.published ? 'Ocultar de la tienda' : 'Publicar en la tienda'}
                       aria-label={product.published ? 'Ocultar' : 'Publicar'}
+                      disabled={busyId === product.id}
                       onClick={() => {
-                        updateProduct(product.id, { published: !product.published })
-                        showToast(
-                          product.published
-                            ? `"${product.name}" ocultada`
-                            : `"${product.name}" publicada`,
-                        )
+                        void togglePublished(product)
                       }}
                     >
                       {product.published ? <IconX /> : <IconCheck />}
@@ -176,9 +208,7 @@ export function ProductsPage() {
         message={`¿Seguro que deseas eliminar "${pendingDelete?.name}"? Esta acción no se puede deshacer.`}
         confirmLabel="Eliminar"
         onConfirm={() => {
-          if (!pendingDelete) return
-          removeProduct(pendingDelete.id)
-          showToast(`"${pendingDelete.name}" eliminado`)
+          void confirmDelete()
         }}
       />
     </div>

@@ -1,20 +1,35 @@
 import { Link, NavLink, Outlet, useParams } from 'react-router-dom'
+import { useEffect } from 'react'
 import { APP_NAME } from '@/config/constants'
 import { buttonClasses } from '@/shared/ui/Button'
 import { EmptyState } from '@/shared/ui/EmptyState'
+import { Spinner } from '@/shared/ui/Spinner'
 import { ThemeToggle } from '@/shared/ui/ThemeToggle'
 import { IconCart, IconStore } from '@/shared/ui/icons'
-import { useStoreById } from '@/shared/hooks/useScopedData'
+import { useStoreById, useStoresStatus } from '@/shared/hooks/useScopedData'
 import { useCartItems } from '@/store/cartStore'
+import { useProductsStore } from '@/store/productsStore'
+import { useUIStore } from '@/store/uiStore'
 import { cn } from '@/shared/utils/cn'
 
 export function StorefrontLayout() {
   const { storeId } = useParams<{ storeId: string }>()
   const store = useStoreById(storeId)
+  const { loading } = useStoresStatus()
+  const loadForStore = useProductsStore((state) => state.loadForStore)
+  const showToast = useUIStore((state) => state.showToast)
   const cartItems = useCartItems(storeId)
   const cartCount = cartItems.reduce((total, item) => total + item.quantity, 0)
 
+  useEffect(() => {
+    if (!storeId) return
+    void loadForStore(storeId).catch(() =>
+      showToast('No se pudieron cargar los productos de la tienda', 'error'),
+    )
+  }, [storeId, loadForStore, showToast])
+
   if (!store) {
+    if (loading) return <Spinner full label="Cargando tienda…" />
     return (
       <div className="flex min-h-[100dvh] items-center justify-center p-6">
         <EmptyState

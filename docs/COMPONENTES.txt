@@ -1,6 +1,6 @@
 ================================================================================
  CREATIENDA — CATÁLOGO DE COMPONENTES DEL FRONTEND / GUI
- Proyecto: sistema de creación de tiendas online (prototipo React + TS + Vite)
+ Proyecto: sistema de creación de tiendas online (React + TS + Vite; datos en la API Flask /api/v1)
  Uso: nombra cualquier entrada de este archivo en tus prompts para indicar
        con exactitud qué parte de la interfaz quieres modificar.
  convención: NOMBRE — src/ruta/ext — descripción
@@ -9,12 +9,13 @@
 --------------------------------------------------------------------------------
 0. ESTRUCTURA GENERAL DE LA APP
 --------------------------------------------------------------------------------
-App                — src/app/App.tsx                — Raíz: envuelve todo con ThemeProvider (tema claro/oscuro), BrowserRouter (rutas) y Toaster (avisos flotantes).
+App                — src/app/App.tsx                — Raíz: carga las tiendas desde la API al montar (bootstrap), envuelve todo con ThemeProvider (tema claro/oscuro), BrowserRouter (rutas) y Toaster (avisos flotantes).
 AppRoutes          — src/app/routes.tsx             — Tabla de todas las rutas del sistema (merchant, storefront y 404).
 NotFoundPage       — src/app/pages/NotFoundPage.tsx — Pantalla "Página no encontrada" con ícono de alerta y botón "Ir a mis tiendas".
 main.tsx           — src/main.tsx                   — Punto de entrada; monta App en #root.
 ThemeProvider      — src/theme/ThemeProvider.tsx    — Aplica la clase "dark" al <html> según el tema guardado.
 Tokens de tema     — src/index.css                  — Variables CSS del esquema blanco/negro: --bg (fondo), --fg (texto), --line (bordes), --surface (tarjetas), --muted (gris secundario), --accent / --accent-fg (relleno invertido, ej. botones). Claro: fondo blanco/bordes negros. Oscuro: fondo gris oscuro/bordes blancos.
+Tokens semánticos  — src/index.css                  — --success (verde), --danger (rojo), --warning (ámbar): NO son de la paleta; solo resaltan sucesos (toasts, badges, errores de formulario). Utilidades Tailwind: text-success/danger/warning, bg-*, border-* con alpha.
 Tailwind classes   — tailwind.config.js             — Colores utilitarios derivados de los tokens: bg-bg, text-fg, border-line, bg-surface, text-muted, bg-accent, text-accent-fg.
 
 --------------------------------------------------------------------------------
@@ -169,56 +170,66 @@ Textarea           — src/shared/ui/Textarea.tsx     — Campo de texto multil�
 Select             — src/shared/ui/Select.tsx       — Menú desplegable nativo con estilo del sistema.
 Label              — src/shared/ui/Label.tsx        — Rótulo de formulario.
 Badge              — src/shared/ui/Badge.tsx        — Etiqueta/píldora pequeña. Variantes: outline,
-                     solid (invertida), muted (gris). Usada para: Publicado, Oculto, Agotado,
-                     Stock bajo, Disponible, Últimas unidades, moneda.
+                      solid (invertida), muted (gris) y semánticas: success (verde), danger (rojo),
+                      warning (ámbar). Usada para: Publicado=success, Agotado=danger, Stock bajo y
+                      Últimas unidades=warning, Disponible=success; Oculto y moneda quedan neutras.
 Modal              — src/shared/ui/Modal.tsx        — Ventana modal centrada con oscurecido del fondo,
                      título, X de cierre, cierre con Esc o clic fuera, y zona de botones (footer).
 ConfirmDialog      — src/shared/ui/ConfirmDialog.tsx— Modal de confirmación estándar ("Cancelar" + un
                      botón de acción). Usada por: eliminar producto y eliminar tienda.
 EmptyState         — src/shared/ui/EmptyState.tsx   — Panel punteado de "nada que mostrar": ícono,
-                     título, descripción y acción opcional.
+                      título, descripción y acción opcional.
+Spinner            — src/shared/ui/Spinner.tsx      — Indicador de carga ("Cargando…") con prop `full`
+                      para pantallas completas (layouts) y variante en-bloque para páginas.
 QuantityStepper    — src/shared/ui/QuantityStepper.tsx — Selector de cantidad "− / campo / +" con min/max.
                      Usado en: detalle de producto y filas del carrito.
 ThemeToggle        — src/shared/ui/ThemeToggle.tsx  — Botón cuadrado sol/luna que alterna modo claro
                      (blanco/negro) y oscuro (gris/blanco). Persiste preferencia. Aparece en: header
                      comerciante, sidebar del dashboard y header de la tienda pública.
-Toaster / Toast    — src/shared/ui/Toaster.tsx      — Avisos flotantes abajo-derecha ("Producto creado",
-                     "agregado al carrito", etc.), con check, X y auto-cierre a los 3.2 s.
-Iconos             — src/shared/ui/icons.tsx        — 22 íconos SVG de línea: IconSun, IconMoon,
+Toaster / Toast    — src/shared/ui/Toaster.tsx      — Avisos flotantes abajo-derecha con tono semántico
+                      (showToast(msg, tone)): success = verde + check, error = rojo + círculo con X,
+                      warning = ámbar + triángulo. Fondo sutil mezclado con surface y auto-cierre a los 3.2 s.
+Iconos             — src/shared/ui/icons.tsx        — 23 íconos SVG de línea: IconSun, IconMoon,
                      IconCart, IconPlus, IconMinus, IconTrash, IconPencil, IconExternal,
                      IconChevronLeft, IconChevronRight, IconImage, IconCheck, IconX, IconStore,
                      IconChart, IconPackage, IconSettings, IconArrowLeft, IconSearch, IconDashboard,
-                     IconBoxes, IconAlert.
+                      IconBoxes, IconAlert, IconCircleX.
 
 --------------------------------------------------------------------------------
 4. STORES DE ESTADO (Zustand) — para nombrar lógica en prompts
 --------------------------------------------------------------------------------
-storesStore        — src/store/storesStore.ts       — Lista de tiendas del comerciante + crear /
-                     actualizar / eliminar (eliminación en cascada de productos y carritos).
-productsStore      — src/store/productsStore.ts     — Catálogo global de productos; acciones de alta,
-                     edición (incluye publicar y cambiar stock) y borrado.
+storesStore        — src/store/storesStore.ts       — Tiendas del comerciante desde la API: load()
+                      (con loading/loaded/error), createStore/updateStore/deleteStore async
+                      (el servidor casca productos; localmente se limpian productos y carrito).
+productsStore      — src/store/productsStore.ts     — Productos por tienda (loadForStore con
+                      loadedStores/loadingByStore); addProduct, updateProduct, removeProduct async.
 cartStore          — src/store/cartStore.ts         — Carritos AISLADOS por tienda (itemsByStore);
-                     addItem, setQuantity, removeItem, clearStore. Persiste en localStorage.
-uiStore            — src/store/uiStore.ts           — Tema (light/dark) y cola de toasts.
+                      addItem, setQuantity, removeItem, clearStore. Persiste en localStorage.
+uiStore            — src/store/uiStore.ts           — Tema (light/dark) y cola de toasts con tono
+                      (success/error/warning).
 hooks de datos     — src/shared/hooks/useScopedData — useStoreById, useProductsByStore, useProductById,
-                     useProductCountByStore (filtrado multi-tienda por storeId).
+                      useProductCountByStore, useStoresStatus, useProductsStatus (distinguir
+                      "cargando" de "no encontrado" cuando los datos llegan de la API).
 
 --------------------------------------------------------------------------------
-5. CAPA DE DATOS (repositorios, aún sin backend)
+5. CAPA DE DATOS (API Flask +/api/v1)
 --------------------------------------------------------------------------------
-localStorageAdapter— src/data/storage/localStorageAdapter.ts — Lectura/escritura JSON con prefijo
-                     "creatienda:"; error amigable si se llena la cuota.
-repository.ts      — src/data/repositories/repository.ts — Repository<T> genérico (findAll, findById,
-                     create, update, remove, removeWhere); futuro reemplazo por API real.
-storeRepository    — src/data/repositories/storeRepository.ts     — Tiendas (clave "creatienda:stores").
-productRepository  — src/data/repositories/productRepository.ts   — Productos (clave "creatienda:products").
-seed.ts            — src/data/seed.ts               — Estado inicial: el sistema arranca VACÍO.
-Tipos de dominio   — src/shared/types/domain.ts     — Store, NewStore, Product, NewProduct, CartItem.
-Utilidades         — src/shared/utils/              — cn (clases CSS), id (generateId),
-                     format (formatPrice, formatDate, parsePrice, parseStock),
-                     image (fileToDataUrl, fileToOptimizedDataUrl con canvas).
+client.ts          — src/data/api/client.ts         — request<T> (JSON, errores ApiError con mensaje
+                      legible), uploadMedia (multipart a POST /api/v1/media), mediaUrl() para
+                      absolutizar las "/media/...". Base: VITE_API_URL (vacío = proxy de Vite).
+storeRepository    — src/data/repositories/storeRepository.ts — /stores (findAll, findById, create,
+                      update PATCH, remove DELETE).
+productRepository  — src/data/repositories/productRepository.ts — /stores/<sid>/products (per_page=200),
+                      /products/<pid> (findById, update, remove).
+localStorageAdapter— src/data/storage/localStorageAdapter.ts — Solo storageKey("creatienda:…") para
+                      carrito y tema (los datos de dominio viven en el backend).
+Tipos de dominio   — src/shared/types/domain.ts     — Store, NewStore, Product, NewProduct, CartItem
+                      (espejo exacto de to_dict() del backend: ids UUID, fechas en ms).
+Utilidades         — src/shared/utils/              — cn (clases CSS), format (formatPrice, formatDate,
+                      parsePrice, parseStock).
 Constantes         — src/config/constants.ts        — APP_NAME "CreaTienda", DEFAULT_CURRENCY USD,
-                     LOW_STOCK_THRESHOLD 5, lista CURRENCIES (USD, EUR, MXN, COP, ARS...).
+                      LOW_STOCK_THRESHOLD 5, lista CURRENCIES (USD, EUR, MXN, COP, ARS...),
+                      sincronizada con app/config.py del backend.
 
 ================================================================================
  EJEMPLO DE USO EN PROMPTS:

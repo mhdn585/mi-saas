@@ -4,12 +4,14 @@ import { ProductCard } from '../components/ProductCard'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { Input } from '@/shared/ui/Input'
 import { IconPackage, IconSearch } from '@/shared/ui/icons'
-import { useProductsByStore, useStoreById } from '@/shared/hooks/useScopedData'
+import { Spinner } from '@/shared/ui/Spinner'
+import { useProductsByStore, useProductsStatus, useStoreById } from '@/shared/hooks/useScopedData'
 
 export function CatalogPage() {
   const { storeId } = useParams<{ storeId: string }>()
   const store = useStoreById(storeId)
   const products = useProductsByStore(storeId)
+  const { loading, loaded } = useProductsStatus(storeId)
   const [query, setQuery] = useState('')
 
   const catalog = useMemo(() => {
@@ -26,6 +28,7 @@ export function CatalogPage() {
   }, [products, query])
 
   if (!store) return null
+  if (loading && !loaded) return <Spinner className="py-16" />
 
   return (
     <div className="flex flex-col gap-6">

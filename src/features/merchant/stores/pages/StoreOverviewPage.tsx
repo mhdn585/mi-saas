@@ -3,7 +3,8 @@ import { Badge } from '@/shared/ui/Badge'
 import { buttonClasses } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { IconExternal, IconImage, IconPlus } from '@/shared/ui/icons'
-import { useProductsByStore, useStoreById } from '@/shared/hooks/useScopedData'
+import { Spinner } from '@/shared/ui/Spinner'
+import { useProductsByStore, useProductsStatus, useStoreById } from '@/shared/hooks/useScopedData'
 import { formatPrice } from '@/shared/utils/format'
 import type { ReactNode } from 'react'
 
@@ -11,8 +12,10 @@ export function StoreOverviewPage() {
   const { storeId } = useParams<{ storeId: string }>()
   const store = useStoreById(storeId)
   const products = useProductsByStore(storeId)
+  const { loading, loaded } = useProductsStatus(storeId)
 
   if (!store) return null
+  if (loading && !loaded) return <Spinner className="py-16" />
 
   const publishedCount = products.filter((product) => product.published).length
   const outOfStockCount = products.filter((product) => product.stock === 0).length
@@ -86,7 +89,7 @@ export function StoreOverviewPage() {
                 </span>
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{product.name}</span>
                 {product.published ? (
-                  <Badge variant="outline">Publicado</Badge>
+                  <Badge variant="success">Publicado</Badge>
                 ) : (
                   <Badge variant="muted">Oculto</Badge>
                 )}

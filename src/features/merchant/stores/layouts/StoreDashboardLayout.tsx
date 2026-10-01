@@ -1,6 +1,8 @@
 import { Link, NavLink, Outlet, useParams } from 'react-router-dom'
-import { buttonClasses } from '@/shared/ui/Button'
+import { useEffect } from 'react'
+import { Button, buttonClasses } from '@/shared/ui/Button'
 import { EmptyState } from '@/shared/ui/EmptyState'
+import { Spinner } from '@/shared/ui/Spinner'
 import { ThemeToggle } from '@/shared/ui/ThemeToggle'
 import {
   IconArrowLeft,
@@ -11,7 +13,10 @@ import {
   IconPackage,
   IconSettings,
 } from '@/shared/ui/icons'
-import { useStoreById } from '@/shared/hooks/useScopedData'
+import { useStoreById, useStoresStatus } from '@/shared/hooks/useScopedData'
+import { useProductsStore } from '@/store/productsStore'
+import { useStoresStore } from '@/store/storesStore'
+import { useUIStore } from '@/store/uiStore'
 import { cn } from '@/shared/utils/cn'
 
 const navItems = [
@@ -25,17 +30,40 @@ const navItems = [
 export function StoreDashboardLayout() {
   const { storeId } = useParams<{ storeId: string }>()
   const store = useStoreById(storeId)
+  const { loading, error } = useStoresStatus()
+  const loadForStore = useProductsStore((state) => state.loadForStore)
+  const showToast = useUIStore((state) => state.showToast)
+
+  useEffect(() => {
+    if (!storeId) return
+    void loadForStore(storeId).catch(() =>
+      showToast('No se pudieron cargar los productos de la tienda', 'error'),
+    )
+  }, [storeId, loadForStore, showToast])
 
   if (!store) {
+    if (loading) return <Spinner full label="Cargando tienda…" />
     return (
       <div className="flex min-h-[100dvh] items-center justify-center p-6">
         <EmptyState
-          title="Tienda no encontrada"
-          description="La tienda que buscas no existe o fue eliminada."
+          title={error ? 'Sin conexión con el servidor' : 'Tienda no encontrada'}
+          description={
+            error ?? 'La tienda que buscas no existe o fue eliminada.'
+          }
           action={
-            <Link to="/" className={buttonClasses('primary', 'md')}>
-              Ir a mis tiendas
-            </Link>
+            error ? (
+              <Button
+                onClick={() =>
+                  void useStoresStore.getState().load({ force: true })
+                }
+              >
+                Reintentar
+              </Button>
+            ) : (
+              <Link to="/" className={buttonClasses('primary', 'md')}>
+                Ir a mis tiendas
+              </Link>
+            )
           }
         />
       </div>

@@ -41,9 +41,9 @@ export function ProductCard({ product, currency }: ProductCardProps) {
               {formatPrice(product.price, currency)}
             </span>
             {product.stock === 0 ? (
-              <Badge variant="solid">Agotado</Badge>
+              <Badge variant="danger">Agotado</Badge>
             ) : product.stock <= LOW_STOCK_THRESHOLD ? (
-              <Badge variant="muted">Últimas unidades</Badge>
+              <Badge variant="warning">Últimas unidades</Badge>
             ) : null}
           </span>
         </span>

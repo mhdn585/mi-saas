@@ -37,3 +37,29 @@ export function useProductCountByStore(storeId: string): number {
     (state) => state.products.filter((product) => product.storeId === storeId).length,
   )
 }
+
+/** Estado de la carga inicial de tiendas (bootstrap de App). */
+export function useStoresStatus(): {
+  loading: boolean
+  loaded: boolean
+  error: string | null
+} {
+  const loading = useStoresStore((state) => state.loading)
+  const loaded = useStoresStore((state) => state.loaded)
+  const error = useStoresStore((state) => state.error)
+  return { loading, loaded, error }
+}
+
+/** Estado de la carga de productos de una tienda concreta. */
+export function useProductsStatus(storeId: string | undefined): {
+  loading: boolean
+  loaded: boolean
+} {
+  const loading = useProductsStore((state) =>
+    storeId ? Boolean(state.loadingByStore[storeId]) : false,
+  )
+  const loaded = useProductsStore((state) =>
+    storeId ? Boolean(state.loadedStores[storeId]) : false,
+  )
+  return { loading, loaded }
+}
