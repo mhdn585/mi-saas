@@ -51,6 +51,8 @@ backend/
       __init__.py
     models/
       __init__.py
+      media_asset.py
+      product_image.py
       product.py
       store.py
     repositories/
@@ -72,16 +74,27 @@ backend/
       __init__.py
       pagination.py
     __init__.py
+    cli.py
     config.py
     errors.py
     extensions.py
+  migrations/
+    versions/
+      0001_initial_schema.py
+      0002_media_assets.py
+      0003_product_images.py
+    env.py
+    script.py.mako
   tests/
     conftest.py
+    test_database.py
     test_media.py
+    test_migrations.py
     test_products.py
     test_stores.py
   .env.example
   .gitignore
+  alembic.ini
   pyproject.toml
   README.md
   requirements-dev.txt
@@ -347,10 +360,110 @@ api.register_blueprint(v1)
 </file>
 
 <file path="backend/app/models/__init__.py">
+from app.models.media_asset import MediaAsset
 from app.models.product import Product
+from app.models.product_image import ProductImage
 from app.models.store import Store
 
-__all__ = ["Product", "Store"]
+__all__ = ["MediaAsset", "Product", "ProductImage", "Store"]
+</file>
+
+<file path="backend/app/models/media_asset.py">
+import time
+import uuid
+
+from app.extensions import db
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+class MediaAsset(db.Model):
+    __tablename__ = "media_assets"
+
+    STATUS_ACTIVE = "active"
+    STATUS_ORPHAN = "orphan"
+    STATUS_DELETED = "deleted"
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    filename = db.Column(db.String(255), nullable=False, unique=True)
+    mime_type = db.Column(db.String(100), nullable=False)
+    format = db.Column(db.String(20), nullable=False)
+    size_bytes = db.Column(db.Integer, nullable=False)
+    width = db.Column(db.Integer, nullable=True)
+    height = db.Column(db.Integer, nullable=True)
+    status = db.Column(db.String(20), nullable=False, default=STATUS_ACTIVE)
+    created_at = db.Column(db.BigInteger, default=_now_ms, nullable=False)
+    updated_at = db.Column(
+        db.BigInteger, default=_now_ms, onupdate=_now_ms, nullable=False
+    )
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "status IN ('active', 'orphan', 'deleted')", name="status_valid"
+        ),
+        db.CheckConstraint("size_bytes >= 0", name="size_non_negative"),
+        db.Index("ix_media_assets_status", "status"),
+    )
+
+    @property
+    def url(self) -> str:
+        return f"/media/{self.filename}"
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "filename": self.filename,
+            "url": self.url,
+            "mimeType": self.mime_type,
+            "format": self.format,
+            "sizeBytes": self.size_bytes,
+            "width": self.width,
+            "height": self.height,
+            "status": self.status,
+            "createdAt": self.created_at,
+            "updatedAt": self.updated_at,
+        }
+</file>
+
+<file path="backend/app/models/product_image.py">
+import time
+
+from app.extensions import db
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+class ProductImage(db.Model):
+    __tablename__ = "product_images"
+
+    product_id = db.Column(
+        db.String(36),
+        db.ForeignKey("products.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    media_asset_id = db.Column(
+        db.String(36),
+        db.ForeignKey("media_assets.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    position = db.Column(db.SmallInteger, nullable=False)
+    created_at = db.Column(db.BigInteger, default=_now_ms, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("product_id", "position"),
+        db.CheckConstraint("position >= 0", name="position_positive"),
+        db.Index("ix_product_images_media_asset", "media_asset_id"),
+    )
+
+    media_asset = db.relationship(
+        "MediaAsset",
+        lazy="joined",
+        innerjoin=False,
+    )
 </file>
 
 <file path="backend/app/models/product.py">
@@ -378,16 +491,32 @@ class Product(db.Model):
     description = db.Column(db.Text, nullable=False, default="")
     price = db.Column(db.Numeric(10, 2), nullable=False, default=0)
     stock = db.Column(db.Integer, nullable=False, default=0)
-    images = db.Column(db.JSON, nullable=False, default=list)
     published = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.BigInteger, default=_now_ms, nullable=False)
     updated_at = db.Column(
         db.BigInteger, default=_now_ms, onupdate=_now_ms, nullable=False
     )
 
-    __table_args__ = (
-        db.Index("ix_products_store_published", "store_id", "published"),
+    product_images = db.relationship(
+        "ProductImage",
+        backref="product",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ProductImage.position",
+        lazy="selectin",
     )
+
+    __table_args__ = (
+        db.Index("ix_products_store_published_created", "store_id", "published", "created_at"),
+        db.Index("ix_products_store_created", "store_id", "created_at"),
+        db.CheckConstraint("TRIM(name) <> ''", name="name_not_blank"),
+        db.CheckConstraint("price >= 0", name="price_non_negative"),
+        db.CheckConstraint("stock >= 0", name="stock_non_negative"),
+    )
+
+    @property
+    def image_urls(self) -> list[str]:
+        return [link.media_asset.url for link in self.product_images]
 
     def to_dict(self) -> dict:
         return {
@@ -397,7 +526,7 @@ class Product(db.Model):
             "description": self.description or "",
             "price": float(self.price),
             "stock": self.stock,
-            "images": self.images or [],
+            "images": self.image_urls,
             "published": self.published,
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
@@ -408,6 +537,7 @@ class Product(db.Model):
 import time
 import uuid
 
+from app.config import CURRENCIES
 from app.extensions import db
 
 
@@ -422,10 +552,22 @@ class Store(db.Model):
     name = db.Column(db.String(60), nullable=False)
     description = db.Column(db.Text, nullable=False, default="")
     currency = db.Column(db.String(3), nullable=False, default="USD")
-    logo = db.Column(db.String, nullable=True)
+    logo_asset_id = db.Column(
+        db.String(36),
+        db.ForeignKey("media_assets.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at = db.Column(db.BigInteger, default=_now_ms, nullable=False)
     updated_at = db.Column(
         db.BigInteger, default=_now_ms, onupdate=_now_ms, nullable=False
+    )
+
+    __table_args__ = (
+        db.CheckConstraint("TRIM(name) <> ''", name="name_not_blank"),
+        db.CheckConstraint(
+            f"currency IN ({', '.join(repr(c) for c in CURRENCIES)})",
+            name="currency_valid",
+        ),
     )
 
     products = db.relationship(
@@ -435,6 +577,12 @@ class Store(db.Model):
         passive_deletes=True,
         lazy=True,
     )
+
+    logo_asset = db.relationship("MediaAsset", lazy="joined", innerjoin=False)
+
+    @property
+    def logo(self) -> str | None:
+        return self.logo_asset.url if self.logo_asset else None
 
     def to_dict(self) -> dict:
         return {
@@ -649,6 +797,7 @@ __all__ = ["media_service", "product_service", "store_service"]
 
 <file path="backend/app/services/media_service.py">
 import io
+import time
 import uuid
 from pathlib import Path
 
@@ -656,6 +805,8 @@ from flask import current_app
 from PIL import Image
 
 from app.errors import ValidationError
+from app.extensions import db
+from app.models.media_asset import MediaAsset
 
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP", "GIF"}
 MAX_DIMENSION = 1000
@@ -663,6 +814,7 @@ JPEG_QUALITY = 85
 
 
 def save_upload(file_storage) -> dict:
+    """Valida, normaliza a JPEG, guarda el archivo y registra el MediaAsset."""
     max_bytes = current_app.config["MAX_UPLOAD_MB"] * 1024 * 1024
     data = file_storage.read(max_bytes + 1)
     if len(data) > max_bytes:
@@ -691,25 +843,123 @@ def save_upload(file_storage) -> dict:
     filename = f"{uuid.uuid4().hex}.jpg"
     media_dir = Path(current_app.config["MEDIA_FOLDER"])
     media_dir.mkdir(parents=True, exist_ok=True)
-    img.save(media_dir / filename, "JPEG", quality=JPEG_QUALITY, optimize=True)
-    return {"url": f"/media/{filename}", "filename": filename}
+    path = media_dir / filename
+    img.save(path, "JPEG", quality=JPEG_QUALITY, optimize=True)
+
+    asset = MediaAsset(
+        filename=filename,
+        mime_type="image/jpeg",
+        format="JPEG",
+        size_bytes=path.stat().st_size,
+        width=img.size[0],
+        height=img.size[1],
+        status=MediaAsset.STATUS_ACTIVE,
+    )
+    db.session.add(asset)
+    db.session.commit()
+    return {"url": asset.url, "filename": filename}
 
 
-def delete_media_file(url) -> bool:
+def find_asset_by_url(url: str) -> MediaAsset | None:
+    """Resuelve una url `/media/<filename>` contra media_assets."""
     if not url or "/media/" not in url:
-        return False
+        return None
     filename = url.rsplit("/media/", 1)[-1]
     if "/" in filename or "\\" in filename or ".." in filename:
-        return False
-    media_dir = Path(current_app.config["MEDIA_FOLDER"]).resolve()
-    dest = (media_dir / filename).resolve()
-    if not str(dest).startswith(str(media_dir)):
-        return False
-    try:
-        dest.unlink(missing_ok=True)
-        return True
-    except OSError:
-        return False
+        return None
+    return db.session.scalar(
+        db.select(MediaAsset).where(MediaAsset.filename == filename)
+    )
+
+
+def resolve_asset_urls(urls: list[str]) -> list[MediaAsset]:
+    """Estricto: cada url debe existir en media_assets; si no, ValidationError."""
+    assets = []
+    seen: set[str] = set()
+    for url in urls:
+        asset = find_asset_by_url(url)
+        if asset is None:
+            raise ValidationError(
+                f"Imagen no reconocida: {url}. Subila primero vía /api/v1/media."
+            )
+        if asset.status == MediaAsset.STATUS_DELETED:
+            raise ValidationError(f"La imagen {url} fue eliminada.")
+        if asset.id in seen:
+            raise ValidationError(f"Imagen duplicada: {url}.")
+        seen.add(asset.id)
+        assets.append(asset)
+    return assets
+
+
+def count_references(asset: MediaAsset) -> int:
+    from app.models.product_image import ProductImage
+    from app.models.store import Store
+
+    in_products = db.session.scalar(
+        db.select(db.func.count()).where(ProductImage.media_asset_id == asset.id)
+    )
+    as_logo = db.session.scalar(
+        db.select(db.func.count()).where(Store.logo_asset_id == asset.id)
+    )
+    return (in_products or 0) + (as_logo or 0)
+
+
+def release_assets(asset_ids) -> None:
+    """Tras borrar referencias: activa → orphan si quedaron sin uso."""
+    ids = list(asset_ids)
+    if not ids:
+        return
+    assets = db.session.scalars(
+        db.select(MediaAsset).where(
+            MediaAsset.id.in_(ids),
+            MediaAsset.status == MediaAsset.STATUS_ACTIVE,
+        )
+    ).all()
+    for asset in assets:
+        if count_references(asset) == 0:
+            asset.status = MediaAsset.STATUS_ORPHAN
+    db.session.commit()
+
+
+def reactivate(asset: MediaAsset) -> None:
+    if asset.status == MediaAsset.STATUS_ORPHAN:
+        asset.status = MediaAsset.STATUS_ACTIVE
+        db.session.commit()
+
+
+def cleanup_orphans(grace_days: int = 7) -> dict:
+    """Marca huérfanos sin referencia y borra archivos tras el período de gracia."""
+    # 1. active sin referencias (subidos que nunca se guardaron) → orphan
+    actives = db.session.scalars(
+        db.select(MediaAsset).where(MediaAsset.status == MediaAsset.STATUS_ACTIVE)
+    ).all()
+    for asset in actives:
+        if count_references(asset) == 0:
+            asset.status = MediaAsset.STATUS_ORPHAN
+    db.session.commit()
+
+    # 2. borrar archivos orphan más antiguos que la gracia
+    cutoff_ms = int((time.time() - grace_days * 86400) * 1000)
+    orphans = db.session.scalars(
+        db.select(MediaAsset)
+        .where(
+            MediaAsset.status == MediaAsset.STATUS_ORPHAN,
+            MediaAsset.updated_at < cutoff_ms,
+        )
+        .order_by(MediaAsset.updated_at)
+    ).all()
+    deleted = 0
+    for asset in orphans:
+        try:
+            (Path(current_app.config["MEDIA_FOLDER"]) / asset.filename).unlink(
+                missing_ok=True
+            )
+        except OSError:
+            continue
+        asset.status = MediaAsset.STATUS_DELETED
+        deleted += 1
+    db.session.commit()
+    return {"found": len(orphans), "deleted": deleted}
 </file>
 
 <file path="backend/app/services/product_service.py">
@@ -717,9 +967,11 @@ from sqlalchemy import func, or_, select
 
 from app.errors import NotFoundError
 from app.extensions import db
+from app.models.media_asset import MediaAsset
 from app.models.product import Product
+from app.models.product_image import ProductImage
 from app.repositories.product_repo import product_repository
-from app.services.media_service import delete_media_file
+from app.services import media_service
 
 
 def list_products(store_id, search=None, published_only=False, page=1, per_page=50):
@@ -750,14 +1002,32 @@ def get_product(product_id, store_id=None):
 
 
 def create_product(store_id: str, data: dict):
+    data = dict(data)
+    urls = data.pop("images", None) or []
+    assets = media_service.resolve_asset_urls(urls)
     data["store_id"] = store_id
-    return product_repository.create(data)
+    product = product_repository.create(data)
+    _set_links(product, assets)
+    db.session.commit()
+    return product
 
 
 def update_product(product_id: str, patch: dict):
+    patch = dict(patch)
+    new_assets = None
+    if "images" in patch:
+        urls = patch.pop("images") or []
+        new_assets = media_service.resolve_asset_urls(urls)
     product = product_repository.update(product_id, patch)
     if product is None:
         raise NotFoundError("Producto no encontrado")
+    if new_assets is not None:
+        old_ids = {link.media_asset_id for link in product.product_images}
+        product.product_images.clear()
+        db.session.flush()
+        _set_links(product, new_assets)
+        db.session.commit()
+        media_service.release_assets(old_ids - {a.id for a in new_assets})
     return product
 
 
@@ -765,16 +1035,30 @@ def delete_product(product_id: str):
     product = product_repository.find_by_id(product_id)
     if product is None:
         raise NotFoundError("Producto no encontrado")
-    for url in product.images or []:
-        delete_media_file(url)
+    asset_ids = {link.media_asset_id for link in product.product_images}
     product_repository.remove(product_id)
+    media_service.release_assets(asset_ids)
+
+
+def _set_links(product: Product, assets: list[MediaAsset]) -> None:
+    for position, asset in enumerate(assets):
+        product.product_images.append(
+            ProductImage(
+                product_id=product.id,
+                media_asset_id=asset.id,
+                position=position,
+            )
+        )
+        if asset.status == MediaAsset.STATUS_ORPHAN:
+            asset.status = MediaAsset.STATUS_ACTIVE
 </file>
 
 <file path="backend/app/services/store_service.py">
-from app.errors import NotFoundError
+from app.errors import NotFoundError, ValidationError
+from app.models.media_asset import MediaAsset
 from app.models.product import Product
 from app.repositories.store_repo import store_repository
-from app.services.media_service import delete_media_file
+from app.services import media_service
 
 
 def list_stores():
@@ -789,13 +1073,25 @@ def get_store(store_id: str):
 
 
 def create_store(data: dict):
+    data = dict(data)
+    _apply_logo(data)
     return store_repository.create(data)
 
 
 def update_store(store_id: str, patch: dict):
+    patch = dict(patch)
+    had_logo = "logo" in patch
+    old_logo_asset_id = None
+    if had_logo:
+        store = get_store(store_id)
+        old_logo_asset_id = store.logo_asset_id
+        _apply_logo(patch)
     store = store_repository.update(store_id, patch)
     if store is None:
         raise NotFoundError("Tienda no encontrada")
+    if had_logo and old_logo_asset_id:
+        if patch.get("logo_asset_id") != old_logo_asset_id:
+            media_service.release_assets([old_logo_asset_id])
     return store
 
 
@@ -804,15 +1100,33 @@ def delete_store(store_id: str):
     if store is None:
         raise NotFoundError("Tienda no encontrada")
 
-    urls: list[str] = []
+    asset_ids: set[str] = set()
+    if store.logo_asset_id:
+        asset_ids.add(store.logo_asset_id)
     for product in Product.query.filter_by(store_id=store_id).all():
-        urls.extend(product.images or [])
-    if store.logo:
-        urls.append(store.logo)
+        asset_ids.update(link.media_asset_id for link in product.product_images)
 
     store_repository.remove(store_id)
-    for url in urls:
-        delete_media_file(url)
+    media_service.release_assets(asset_ids)
+
+
+def _apply_logo(data: dict) -> None:
+    if "logo" not in data:
+        return
+    url = data.pop("logo")
+    if url is None:
+        data["logo_asset_id"] = None
+        return
+    asset = media_service.find_asset_by_url(url)
+    if asset is None:
+        raise ValidationError(
+            f"Logo no reconocido: {url}. Subilo primero vía /api/v1/media."
+        )
+    if asset.status == MediaAsset.STATUS_DELETED:
+        raise ValidationError(f"El logo {url} fue eliminado.")
+    if asset.status == MediaAsset.STATUS_ORPHAN:
+        media_service.reactivate(asset)
+    data["logo_asset_id"] = asset.id
 </file>
 
 <file path="backend/app/utils/__init__.py">
@@ -889,23 +1203,61 @@ def create_app(config_object=None) -> Flask:
         response.headers["Cache-Control"] = "public, max-age=86400"
         return response
 
-    with app.app_context():
-        db.create_all()
+    from app.cli import register_cli
+
+    register_cli(app)
 
     @app.shell_context_processor
     def shell_context():
-        from app.models import Product, Store
+        from app.models import MediaAsset, Product, ProductImage, Store
 
-        return {"db": db, "Product": Product, "Store": Store}
+        return {
+            "db": db,
+            "Product": Product,
+            "Store": Store,
+            "MediaAsset": MediaAsset,
+            "ProductImage": ProductImage,
+        }
 
     return app
+</file>
+
+<file path="backend/app/cli.py">
+import click
+from flask.cli import with_appcontext
+
+
+@click.group("media")
+def media_cli():
+    """Comandos de mantenimiento de archivos media."""
+
+
+@media_cli.command("cleanup")
+@click.option(
+    "--grace-days",
+    default=7,
+    show_default=True,
+    help="Días de gracia antes de borrar un asset huérfano.",
+)
+@with_appcontext
+def cleanup_orphans(grace_days: int):
+    """Borra archivos físicos de assets huérfanos tras el período de gracia."""
+    from app.services import media_service
+
+    result = media_service.cleanup_orphans(grace_days)
+    click.echo(
+        f"Huérfanos encontrados: {result['found']} — "
+        f"archivos eliminados: {result['deleted']}."
+    )
+
+
+def register_cli(app):
+    app.cli.add_command(media_cli)
 </file>
 
 <file path="backend/app/config.py">
 import os
 from pathlib import Path
-
-from sqlalchemy.pool import StaticPool
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 INSTANCE_DIR = BASE_DIR / "instance"
@@ -951,6 +1303,7 @@ class Config:
         os.environ.get("DATABASE_URL", f"sqlite:///{INSTANCE_DIR / 'app.db'}")
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
     FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "http://127.0.0.1:5173")
     MEDIA_FOLDER = os.environ.get("MEDIA_FOLDER", str(MEDIA_DIR))
     MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "5"))
@@ -966,16 +1319,18 @@ class DevConfig(Config):
 class ProdConfig(Config):
     DEBUG = False
     ENV = "production"
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_pre_ping": True,
+        "pool_size": 5,
+        "max_overflow": 10,
+    }
 
 
 class TestConfig(Config):
     TESTING = True
     DEBUG = True
-    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        "poolclass": StaticPool,
-        "connect_args": {"check_same_thread": False},
-    }
+    SQLALCHEMY_DATABASE_URI = os.environ.get("TEST_DATABASE_URL", "")
+    SQLALCHEMY_ENGINE_OPTIONS = {}
     MAX_CONTENT_LENGTH = None
     MEDIA_FOLDER = str(BASE_DIR / "instance" / "media_test")
 </file>
@@ -1063,10 +1418,18 @@ def register_error_handlers(app):
 <file path="backend/app/extensions.py">
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import event
+from sqlalchemy import MetaData, event
 from sqlalchemy.engine import Engine
 
-db = SQLAlchemy()
+NAMING_CONVENTION = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+db = SQLAlchemy(metadata=MetaData(naming_convention=NAMING_CONVENTION))
 cors = CORS()
 
 
@@ -1082,23 +1445,374 @@ def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
     cursor.close()
 </file>
 
-<file path="backend/tests/conftest.py">
-import pytest
+<file path="backend/migrations/versions/0001_initial_schema.py">
+"""esquema inicial: stores y products con constraints e índices
 
-from app import create_app
-from app.config import TestConfig
-from app.extensions import db
+Revision ID: 0001
+Revises:
+Create Date: 2026-10-01
+"""
+from collections.abc import Sequence
+
+import sqlalchemy as sa
+from alembic import op
+
+revision: str = "0001"
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+CURRENCIES = (
+    "USD", "EUR", "MXN", "COP", "ARS", "CLP", "PEN",
+    "BOB", "UYU", "VES", "DOP", "CRC", "GTQ", "PAB",
+)
+
+
+def upgrade() -> None:
+    op.create_table(
+        "stores",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("name", sa.String(60), nullable=False),
+        sa.Column("description", sa.Text(), nullable=False, server_default=""),
+        sa.Column("currency", sa.String(3), nullable=False, server_default="USD"),
+        sa.Column("created_at", sa.BigInteger(), nullable=False),
+        sa.Column("updated_at", sa.BigInteger(), nullable=False),
+        sa.CheckConstraint("TRIM(name) <> ''", name="name_not_blank"),
+        sa.CheckConstraint(
+            f"currency IN ({', '.join(repr(c) for c in CURRENCIES)})",
+            name="currency_valid",
+        ),
+    )
+    op.create_table(
+        "products",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("store_id", sa.String(36), nullable=False),
+        sa.Column("name", sa.String(80), nullable=False),
+        sa.Column("description", sa.Text(), nullable=False, server_default=""),
+        sa.Column("price", sa.Numeric(10, 2), nullable=False, server_default="0"),
+        sa.Column("stock", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("published", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column("created_at", sa.BigInteger(), nullable=False),
+        sa.Column("updated_at", sa.BigInteger(), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["store_id"],
+            ["stores.id"],
+            name="fk_products_store_id_stores",
+            ondelete="CASCADE",
+        ),
+        sa.CheckConstraint("TRIM(name) <> ''", name="name_not_blank"),
+        sa.CheckConstraint("price >= 0", name="price_non_negative"),
+        sa.CheckConstraint("stock >= 0", name="stock_non_negative"),
+    )
+    op.create_index(
+        "ix_products_store_id", "products", ["store_id"]
+    )
+    op.create_index(
+        "ix_products_store_published_created",
+        "products",
+        ["store_id", "published", "created_at"],
+    )
+    op.create_index(
+        "ix_products_store_created", "products", ["store_id", "created_at"]
+    )
+
+
+def downgrade() -> None:
+    op.drop_index("ix_products_store_created", table_name="products")
+    op.drop_index("ix_products_store_published_created", table_name="products")
+    op.drop_index("ix_products_store_id", table_name="products")
+    op.drop_table("products")
+    op.drop_table("stores")
+</file>
+
+<file path="backend/migrations/versions/0002_media_assets.py">
+"""tabla media_assets: registro en base de archivos subidos
+
+Revision ID: 0002
+Revises: 0001
+Create Date: 2026-10-01
+"""
+from collections.abc import Sequence
+
+import sqlalchemy as sa
+from alembic import op
+
+revision: str = "0002"
+down_revision: str | None = "0001"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "media_assets",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("filename", sa.String(255), nullable=False),
+        sa.Column("mime_type", sa.String(100), nullable=False),
+        sa.Column("format", sa.String(20), nullable=False),
+        sa.Column("size_bytes", sa.Integer(), nullable=False),
+        sa.Column("width", sa.Integer(), nullable=True),
+        sa.Column("height", sa.Integer(), nullable=True),
+        sa.Column("status", sa.String(20), nullable=False, server_default="active"),
+        sa.Column("created_at", sa.BigInteger(), nullable=False),
+        sa.Column("updated_at", sa.BigInteger(), nullable=False),
+        sa.UniqueConstraint("filename", name="uq_media_assets_filename"),
+        sa.CheckConstraint(
+            "status IN ('active', 'orphan', 'deleted')",
+            name="status_valid",
+        ),
+        sa.CheckConstraint("size_bytes >= 0", name="size_non_negative"),
+    )
+    op.create_index("ix_media_assets_status", "media_assets", ["status"])
+
+
+def downgrade() -> None:
+    op.drop_index("ix_media_assets_status", table_name="media_assets")
+    op.drop_table("media_assets")
+</file>
+
+<file path="backend/migrations/versions/0003_product_images.py">
+"""imágenes de producto normalizadas + logo de tienda referenciado
+
+Revision ID: 0003
+Revises: 0002
+Create Date: 2026-10-01
+"""
+from collections.abc import Sequence
+
+import sqlalchemy as sa
+from alembic import op
+
+revision: str = "0003"
+down_revision: str | None = "0002"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "product_images",
+        sa.Column("product_id", sa.String(36), nullable=False),
+        sa.Column("media_asset_id", sa.String(36), nullable=False),
+        sa.Column("position", sa.SmallInteger(), nullable=False),
+        sa.Column("created_at", sa.BigInteger(), nullable=False),
+        sa.PrimaryKeyConstraint("product_id", "media_asset_id", name="pk_product_images"),
+        sa.ForeignKeyConstraint(
+            ["product_id"],
+            ["products.id"],
+            name="fk_product_images_product_id_products",
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["media_asset_id"],
+            ["media_assets.id"],
+            name="fk_product_images_media_asset_id_media_assets",
+            ondelete="RESTRICT",
+        ),
+        sa.UniqueConstraint(
+            "product_id", "position", name="uq_product_images_product_id_position"
+        ),
+        sa.CheckConstraint("position >= 0", name="position_positive"),
+    )
+    op.create_index(
+        "ix_product_images_media_asset", "product_images", ["media_asset_id"]
+    )
+    op.add_column(
+        "stores",
+        sa.Column("logo_asset_id", sa.String(36), nullable=True),
+    )
+    op.create_foreign_key(
+        "fk_stores_logo_asset_id_media_assets",
+        "stores",
+        "media_assets",
+        ["logo_asset_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+
+
+def downgrade() -> None:
+    op.drop_constraint(
+        "fk_stores_logo_asset_id_media_assets", "stores", type_="foreignkey"
+    )
+    op.drop_column("stores", "logo_asset_id")
+    op.drop_index("ix_product_images_media_asset", table_name="product_images")
+    op.drop_table("product_images")
+</file>
+
+<file path="backend/migrations/env.py">
+import os
+import sys
+from logging.config import fileConfig
+from pathlib import Path
+
+from alembic import context
+from dotenv import load_dotenv
+from sqlalchemy import engine_from_config, pool
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BACKEND_DIR))
+load_dotenv(BACKEND_DIR / ".env")
+
+config = context.config
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+url = (
+    os.environ.get("ALEMBIC_DATABASE_URL")
+    or config.get_main_option("sqlalchemy.url")
+    or os.environ.get("DATABASE_URL")
+)
+if not url:
+    raise RuntimeError(
+        "No hay URL de base de datos para Alembic. "
+        "Definí DATABASE_URL en backend/.env."
+    )
+config.set_main_option("sqlalchemy.url", url)
+
+import app.models  # noqa: E402,F401
+from app.extensions import db  # noqa: E402
+
+target_metadata = db.metadata
+
+
+def run_migrations_offline() -> None:
+    context.configure(
+        url=config.get_main_option("sqlalchemy.url"),
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+        compare_type=True,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+</file>
+
+<file path="backend/migrations/script.py.mako">
+"""${message}
+
+Revision ID: ${up_revision}
+Revises: ${down_revision | comma,n}
+Create Date: ${create_date}
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+${imports if imports else ""}
+
+revision: str = ${repr(up_revision)}
+down_revision: Union[str, None] = ${repr(down_revision)}
+branch_labels: Union[str, Sequence[str], None] = ${repr(branch_labels)}
+depends_on: Union[str, Sequence[str], None] = ${repr(depends_on)}
+
+
+def upgrade() -> None:
+    ${upgrades if upgrades else "pass"}
+
+
+def downgrade() -> None:
+    ${downgrades if downgrades else "pass"}
+</file>
+
+<file path="backend/tests/conftest.py">
+import os
+from pathlib import Path
+
+import pytest
+from dotenv import load_dotenv
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BACKEND_DIR / ".env")
+
+from alembic import command  # noqa: E402
+from alembic.config import Config as AlembicConfig  # noqa: E402
+from sqlalchemy import create_engine, text  # noqa: E402
+from sqlalchemy.engine import make_url  # noqa: E402
+
+from app import create_app  # noqa: E402
+from app.config import TestConfig  # noqa: E402
+from app.extensions import db  # noqa: E402
+
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "")
+
+
+def _alembic_config(url: str) -> AlembicConfig:
+    cfg = AlembicConfig(str(BACKEND_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    return cfg
+
+
+def _ensure_database(url: str) -> None:
+    """Crea la base de test si no existe (usa la DB 'postgres' de mantenimiento)."""
+    target = make_url(url)
+    maint = target.set(database="postgres")
+    engine = create_engine(maint, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM pg_database WHERE datname = :name"),
+            {"name": target.database},
+        ).scalar()
+        if not exists:
+            conn.exec_driver_sql(
+                f'CREATE DATABASE "{target.database}" OWNER "{target.username}"'
+            )
+    engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def migrated_test_db() -> str:
+    if not TEST_DATABASE_URL:
+        raise RuntimeError(
+            "Falta TEST_DATABASE_URL en backend/.env "
+            "(ej. postgresql+psycopg2://cretienda:...@127.0.0.1:5432/cretienda_test)"
+        )
+    _ensure_database(TEST_DATABASE_URL)
+    command.upgrade(_alembic_config(TEST_DATABASE_URL), "head")
+    return TEST_DATABASE_URL
 
 
 @pytest.fixture
-def app(tmp_path):
+def app(migrated_test_db, tmp_path):
     config = TestConfig()
+    config.SQLALCHEMY_DATABASE_URI = migrated_test_db
     app = create_app(config)
     app.config["MEDIA_FOLDER"] = str(tmp_path / "media")
     yield app
     with app.app_context():
         db.session.remove()
-        db.drop_all()
+        db.session.execute(
+            text(
+                "TRUNCATE TABLE media_assets, product_images, products, stores "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
+        db.session.commit()
 
 
 @pytest.fixture
@@ -1121,6 +1835,189 @@ def make_store(client):
         return resp.get_json()
 
     return _make
+
+
+@pytest.fixture
+def upload_image(client):
+    """Sube una imagen de prueba real y devuelve su payload {url, filename}."""
+
+    def _upload(color=(200, 30, 30), size=(60, 60)):
+        import io
+
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGB", size, color).save(buf, "PNG")
+        buf.seek(0)
+        resp = client.post(
+            "/api/v1/media",
+            data={"file": (buf, "test.png")},
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 201
+        return resp.get_json()
+
+    return _upload
+</file>
+
+<file path="backend/tests/test_database.py">
+from sqlalchemy.exc import IntegrityError
+
+from app.extensions import db
+from app.models.media_asset import MediaAsset
+from app.models.product import Product
+from app.models.product_image import ProductImage
+from app.models.store import Store
+
+
+def _store(**kw) -> Store:
+    defaults = {"name": "T", "description": "", "currency": "USD"}
+    defaults.update(kw)
+    return Store(**defaults)
+
+
+def _product(store_id, **kw) -> Product:
+    defaults = {"store_id": store_id, "name": "P", "price": 10, "stock": 1}
+    defaults.update(kw)
+    return Product(**defaults)
+
+
+def _commit_or_rollback(stmt_fn):
+    try:
+        stmt_fn()
+        db.session.commit()
+        return None
+    except IntegrityError as exc:
+        db.session.rollback()
+        return exc.orig.pgcode if exc.orig is not None else "integrity"
+
+
+def test_store_name_blank_rejected_by_db(app):
+    with app.app_context():
+        code = _commit_or_rollback(lambda: db.session.add(_store(name="   ")))
+    assert code == "23514"  # check_violation
+
+
+def test_store_currency_invalid_rejected_by_db(app):
+    with app.app_context():
+        code = _commit_or_rollback(lambda: db.session.add(_store(currency="XXX")))
+    assert code == "23514"
+
+
+def test_product_negative_price_rejected_by_db(app, make_store):
+    store_id = make_store()["id"]
+    with app.app_context():
+        code = _commit_or_rollback(lambda: db.session.add(_product(store_id, price=-1)))
+    assert code == "23514"
+
+
+def test_product_negative_stock_rejected_by_db(app, make_store):
+    store_id = make_store()["id"]
+    with app.app_context():
+        code = _commit_or_rollback(lambda: db.session.add(_product(store_id, stock=-5)))
+    assert code == "23514"
+
+
+def test_product_requires_existing_store(app):
+    with app.app_context():
+        code = _commit_or_rollback(lambda: db.session.add(_product("store-inexistente")))
+    assert code == "23503"  # foreign_key_violation
+
+
+def test_store_delete_cascades_products_and_images(app, make_store, upload_image):
+    store_id = make_store()["id"]
+    img = upload_image()
+    with app.app_context():
+        asset = db.session.scalar(
+            db.select(MediaAsset).where(MediaAsset.filename == img["filename"])
+        )
+        product = _product(store_id)
+        db.session.add(product)
+        db.session.flush()
+        db.session.add(
+            ProductImage(product_id=product.id, media_asset_id=asset.id, position=0)
+        )
+        store = db.session.get(Store, store_id)
+        db.session.delete(store)
+        db.session.commit()
+        assert db.session.scalar(db.select(db.func.count(Product.id))) == 0
+        assert db.session.scalar(db.select(db.func.count(ProductImage.product_id))) == 0
+
+
+def test_media_asset_in_use_cannot_be_deleted_directly(app, upload_image, make_store):
+    from sqlalchemy import delete as sa_delete
+
+    img = upload_image()
+    with app.app_context():
+        asset = db.session.scalar(
+            db.select(MediaAsset).where(MediaAsset.filename == img["filename"])
+        )
+        product = _product(make_store()["id"])
+        db.session.add(product)
+        db.session.flush()
+        db.session.add(
+            ProductImage(product_id=product.id, media_asset_id=asset.id, position=0)
+        )
+        db.session.commit()
+
+        def _delete():
+            db.session.execute(
+                sa_delete(MediaAsset).where(MediaAsset.id == asset.id)
+            )
+
+        code = _commit_or_rollback(_delete)
+    assert code == "23503"
+
+
+def test_media_asset_referenced_by_two_products_allowed(app, make_store, upload_image):
+    img = upload_image()
+    s1, s2 = make_store()["id"], make_store()["id"]
+    with app.app_context():
+        asset = db.session.scalar(
+            db.select(MediaAsset).where(MediaAsset.filename == img["filename"])
+        )
+        p1, p2 = _product(s1), _product(s2)
+        db.session.add_all([p1, p2])
+        db.session.flush()
+        db.session.add_all(
+            [
+                ProductImage(product_id=p1.id, media_asset_id=asset.id, position=0),
+                ProductImage(product_id=p2.id, media_asset_id=asset.id, position=0),
+            ]
+        )
+        db.session.commit()
+        links = db.session.scalars(
+            db.select(ProductImage).where(ProductImage.media_asset_id == asset.id)
+        ).all()
+        assert len(links) == 2
+
+
+def test_product_images_unique_position(app, make_store, upload_image):
+    store_id = make_store()["id"]
+    img1, img2 = upload_image(), upload_image()
+    with app.app_context():
+        a1 = db.session.scalar(
+            db.select(MediaAsset).where(MediaAsset.filename == img1["filename"])
+        )
+        a2 = db.session.scalar(
+            db.select(MediaAsset).where(MediaAsset.filename == img2["filename"])
+        )
+        product = _product(store_id)
+        db.session.add(product)
+        db.session.flush()
+        db.session.add(
+            ProductImage(product_id=product.id, media_asset_id=a1.id, position=0)
+        )
+        db.session.flush()
+
+        def _dup():
+            db.session.add(
+                ProductImage(product_id=product.id, media_asset_id=a2.id, position=0)
+            )
+            db.session.flush()
+
+        code = _commit_or_rollback(_dup)
+    assert code == "23505"  # unique_violation
 </file>
 
 <file path="backend/tests/test_media.py">
@@ -1177,6 +2074,165 @@ def test_health(client):
     resp = client.get("/api/v1/health")
     assert resp.status_code == 200
     assert resp.get_json() == {"status": "ok"}
+
+
+def _asset_by_filename(app, filename):
+    from sqlalchemy import select
+
+    from app.extensions import db
+    from app.models.media_asset import MediaAsset
+
+    with app.app_context():
+        return db.session.scalar(
+            select(MediaAsset).where(MediaAsset.filename == filename)
+        )
+
+
+def test_upload_registers_media_asset(client, app):
+    upload = client.post(
+        "/api/v1/media",
+        data={"file": (_png_bytes(size=(80, 40)), "foto.png")},
+        content_type="multipart/form-data",
+    ).get_json()
+
+    asset = _asset_by_filename(app, upload["filename"])
+    assert asset is not None
+    assert asset.status == "active"
+    assert asset.mime_type == "image/jpeg"
+    assert asset.format == "JPEG"
+    assert asset.width == 80
+    assert asset.height == 40
+    assert asset.size_bytes > 0
+    assert asset.url == upload["url"]
+
+
+def test_invalid_upload_does_not_create_asset(client, app):
+    data = io.BytesIO(b"texto sin imagen")
+    resp = client.post(
+        "/api/v1/media",
+        data={"file": (data, "nota.txt")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 422
+    with app.app_context():
+        from sqlalchemy import func, select
+
+        from app.extensions import db
+        from app.models.media_asset import MediaAsset
+
+        count = db.session.scalar(select(func.count()).select_from(MediaAsset))
+    assert count == 0
+
+
+def test_store_logo_referenced_and_orphaned_on_delete(client, app, upload_image, make_store):
+    img = upload_image()
+    store = make_store(logo=img["url"])
+    assert store["logo"] == img["url"]
+
+    asset = _asset_by_filename(app, img["filename"])
+    assert asset is not None
+    assert asset.status == "active"
+
+    resp = client.delete(f"/api/v1/stores/{store['id']}")
+    assert resp.status_code == 204
+
+    from pathlib import Path
+
+    assert Path(app.config["MEDIA_FOLDER"], img["filename"]).exists()
+    assert _asset_by_filename(app, img["filename"]).status == "orphan"
+
+
+def test_store_logo_rejects_unknown_url(client, make_store):
+    resp = client.patch(
+        f"/api/v1/stores/{make_store()['id']}",
+        json={"logo": "/media/jamas-subida.jpg"},
+    )
+    assert resp.status_code == 422
+
+
+def test_store_logo_change_orphans_previous(client, app, upload_image, make_store):
+    logo1 = upload_image()
+    logo2 = upload_image()
+    store = make_store(logo=logo1["url"])
+    resp = client.patch(
+        f"/api/v1/stores/{store['id']}", json={"logo": logo2["url"]}
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["logo"] == logo2["url"]
+    assert _asset_by_filename(app, logo1["filename"]).status == "orphan"
+    assert _asset_by_filename(app, logo2["filename"]).status == "active"
+</file>
+
+<file path="backend/tests/test_migrations.py">
+import pytest
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
+
+from tests.conftest import TEST_DATABASE_URL, _alembic_config, _ensure_database
+
+MIG_DB = "cretienda_mig_test"
+
+
+@pytest.fixture
+def scratch_url():
+    base = make_url(TEST_DATABASE_URL)
+    url = base.set(database=MIG_DB).render_as_string(hide_password=False)
+    maint = create_engine(base.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    with maint.connect() as conn:
+        conn.exec_driver_sql(f'DROP DATABASE IF EXISTS "{MIG_DB}" WITH (FORCE)')
+        conn.exec_driver_sql(f'CREATE DATABASE "{MIG_DB}" OWNER "{base.username}"')
+    maint.dispose()
+    yield url
+    drop = create_engine(base.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    with drop.connect() as conn:
+        conn.exec_driver_sql(f'DROP DATABASE IF EXISTS "{MIG_DB}" WITH (FORCE)')
+    drop.dispose()
+
+
+def test_upgrade_downgrade_cycle(scratch_url):
+    _ensure_database(scratch_url)
+    cfg = _alembic_config(scratch_url)
+    from alembic import command
+
+    engine = create_engine(scratch_url)
+    try:
+        command.upgrade(cfg, "head")
+        names = set(inspect(engine).get_table_names())
+        assert {"stores", "products", "media_assets", "product_images"} <= names
+
+        command.downgrade(cfg, "-1")
+        names = set(inspect(engine).get_table_names())
+        assert "product_images" not in names
+        assert "stores" in names
+
+        command.downgrade(cfg, "base")
+        names = set(inspect(engine).get_table_names())
+        assert names == {"alembic_version"}
+
+        command.upgrade(cfg, "head")
+        names = set(inspect(engine).get_table_names())
+        assert {"stores", "products", "media_assets", "product_images"} <= names
+
+        # constraints e índices sobreviven el ciclo
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO stores (id, name, description, currency, "
+                    "created_at, updated_at) VALUES "
+                    "('s1', 'ok', '', 'USD', 1, 1)"
+                )
+            )
+            with pytest.raises(IntegrityError):
+                conn.execute(
+                    text(
+                        "INSERT INTO stores (id, name, description, currency, "
+                        "created_at, updated_at) VALUES "
+                        "('s2', '', '', 'USD', 1, 1)"
+                    )
+                )
+    finally:
+        engine.dispose()
 </file>
 
 <file path="backend/tests/test_products.py">
@@ -1302,6 +2358,150 @@ def test_create_product_too_many_images(client, make_store):
         json={"name": "X", "price": 1, "images": [f"/media/{i}.jpg" for i in range(13)]},
     )
     assert resp.status_code == 422
+
+
+def _asset_status(app, asset_id):
+    from sqlalchemy import select
+
+    from app.extensions import db
+    from app.models.media_asset import MediaAsset
+
+    with app.app_context():
+        return db.session.scalar(select(MediaAsset.status).where(MediaAsset.id == asset_id))
+
+
+def _asset_id_by_url(app, url):
+    from sqlalchemy import select
+
+    from app.extensions import db
+    from app.models.media_asset import MediaAsset
+
+    filename = url.rsplit("/media/", 1)[-1]
+    with app.app_context():
+        return db.session.scalar(
+            select(MediaAsset.id).where(MediaAsset.filename == filename)
+        )
+
+
+def test_create_product_with_real_images_keeps_order(client, make_store, upload_image):
+    store = make_store()
+    img1 = upload_image()
+    img2 = upload_image()
+    body = _create_product(
+        client, store["id"], images=[img1["url"], img2["url"]]
+    )
+    assert body["images"] == [img1["url"], img2["url"]]
+
+
+def test_create_product_rejects_unknown_image(client, make_store):
+    resp = client.post(
+        f"/api/v1/stores/{make_store()['id']}/products",
+        json={"name": "X", "price": 1, "images": ["/media/no-subida.jpg"]},
+    )
+    assert resp.status_code == 422
+    assert resp.get_json()["error"]["code"] == "validation_error"
+
+
+def test_create_product_rejects_duplicate_images(client, make_store, upload_image):
+    img = upload_image()
+    resp = client.post(
+        f"/api/v1/stores/{make_store()['id']}/products",
+        json={"name": "X", "price": 1, "images": [img["url"], img["url"]]},
+    )
+    assert resp.status_code == 422
+
+
+def test_update_product_images_marks_removed_as_orphan(client, app, make_store, upload_image):
+    store = make_store()
+    img_a = upload_image()
+    img_b = upload_image()
+    product = _create_product(client, store["id"], images=[img_a["url"], img_b["url"]])
+
+    resp = client.patch(
+        f"/api/v1/products/{product['id']}", json={"images": [img_b["url"]]}
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["images"] == [img_b["url"]]
+
+    asset_a_id = _asset_id_by_url(app, img_a["url"])
+    assert _asset_status(app, asset_a_id) == "orphan"
+
+
+def test_update_product_rereferences_orphan_reactivates(client, app, make_store, upload_image):
+    store = make_store()
+    img = upload_image()
+    product = _create_product(client, store["id"], images=[img["url"]])
+    client.patch(f"/api/v1/products/{product['id']}", json={"images": []})
+    url_ref = _asset_id_by_url(app, img["url"])
+    assert _asset_status(app, url_ref) == "orphan"
+
+    resp = client.patch(
+        f"/api/v1/products/{product['id']}", json={"images": [img["url"]]}
+    )
+    assert resp.status_code == 200
+    assert _asset_status(app, url_ref) == "active"
+
+
+def test_delete_product_marks_assets_orphan_keeps_file(client, app, make_store, upload_image):
+    store = make_store()
+    img = upload_image()
+    product = _create_product(client, store["id"], images=[img["url"]])
+
+    assert client.delete(f"/api/v1/products/{product['id']}").status_code == 204
+
+    asset_id = _asset_id_by_url(app, img["url"])
+    assert _asset_status(app, asset_id) == "orphan"
+    from pathlib import Path
+
+    media_file = Path(app.config["MEDIA_FOLDER"]) / img["filename"]
+    assert media_file.exists()
+
+
+def test_shared_asset_stays_active_after_deleting_one_product(
+    client, app, make_store, upload_image
+):
+    store = make_store()
+    img = upload_image()
+    p1 = _create_product(client, store["id"], name="P1", images=[img["url"]])
+    _create_product(client, store["id"], name="P2", images=[img["url"]])
+
+    client.delete(f"/api/v1/products/{p1['id']}")
+    asset_id = _asset_id_by_url(app, img["url"])
+    assert _asset_status(app, asset_id) == "active"
+
+
+def test_cleanup_orphans_deletes_after_grace(client, app, make_store, upload_image):
+    from pathlib import Path
+    from time import time
+
+    from sqlalchemy import update
+
+    from app.extensions import db
+    from app.models.media_asset import MediaAsset
+    from app.services import media_service
+
+    img = upload_image()
+    media_file = Path(app.config["MEDIA_FOLDER"]) / img["filename"]
+    assert media_file.exists()
+
+    resp = client.post(
+        f"/api/v1/stores/{make_store()['id']}/products",
+        json={"name": "X", "price": 1, "images": [img["url"]]},
+    )
+    product_id = resp.get_json()["id"]
+    client.delete(f"/api/v1/products/{product_id}")
+
+    old_ms = int((time() - 10 * 86400) * 1000)
+    with app.app_context():
+        db.session.execute(update(MediaAsset).values(updated_at=old_ms))
+        db.session.commit()
+
+    with app.app_context():
+        result = media_service.cleanup_orphans(grace_days=7)
+    assert result["deleted"] == 1
+    assert not media_file.exists()
+    asset_id = _asset_id_by_url(app, img["url"])
+    assert _asset_status(app, asset_id) == "deleted"
 </file>
 
 <file path="backend/tests/test_stores.py">
@@ -1375,7 +2575,8 @@ def test_create_store_blank_name(client):
 <file path="backend/.env.example">
 FLASK_ENV=development
 SECRET_KEY=change-this-in-production
-DATABASE_URL=sqlite:///instance/app.db
+DATABASE_URL=postgresql+psycopg2://cretienda:TU_PASSWORD@127.0.0.1:5432/cretienda_dev
+TEST_DATABASE_URL=postgresql+psycopg2://cretienda:TU_PASSWORD@127.0.0.1:5432/cretienda_test
 FRONTEND_ORIGIN=http://127.0.0.1:5173
 MAX_UPLOAD_MB=5
 HOST=127.0.0.1
@@ -1392,6 +2593,49 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+</file>
+
+<file path="backend/alembic.ini">
+[alembic]
+script_location = %(here)s/migrations
+prepend_sys_path = %(here)s
+sqlalchemy.url =
+disable_existing_loggers = false
+path_separator = os
+
+[loggers]
+keys = root,sqlalchemy,alembic
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARNING
+handlers = console
+qualname =
+
+[logger_sqlalchemy]
+level = WARNING
+handlers =
+qualname = sqlalchemy.engine
+
+[logger_alembic]
+level = INFO
+handlers =
+qualname = alembic
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %(levelname)-5.5s [%(name)s] %(message)s
+datefmt = %H:%M:%S
 </file>
 
 <file path="backend/pyproject.toml">
@@ -1412,15 +2656,17 @@ addopts = "-q"
 </file>
 
 <file path="backend/README.md">
-# CreaTienda — Backend (Flask)
+# CreaTienda — Backend (Flask + PostgreSQL)
 
 API REST en Python/Flask para el SaaS CreaTienda. Arquitectura modular en capas
-(**rutas → servicios → repositorios → modelos**) con persistencia en SQLite vía
-SQLAlchemy. Espejo del prototipo frontend (Stores, Products, Media).
+(**rutas → servicios → repositorios → modelos**) con persistencia en **PostgreSQL**
+vía SQLAlchemy y esquema **versionado con Alembic**. Espejo del prototipo frontend
+(Stores, Products, Media).
 
 ## Requisitos
 - Python 3.11+ (probado en 3.13)
 - `pip`, `venv`
+- PostgreSQL 14+ (probado en 17)
 
 ## Puesta en marcha
 
@@ -1429,17 +2675,42 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
-cp .env.example .env        # edita SECRET_KEY en producción
-python run.py                # http://127.0.0.1:8000
+
+# 1) Crear rol y bases (una vez, como usuario postgres):
+#    sudo -u postgres psql -c "CREATE ROLE cretienda LOGIN PASSWORD '...' CREATEDB;"
+#    sudo -u postgres createdb -O cretienda cretienda_dev
+#    sudo -u postgres createdb -O cretienda cretienda_test
+
+# 2) Configurar .env (usa el .env.example como plantilla):
+cp .env.example .env   # pon tus DATABASE_URL / TEST_DATABASE_URL y SECRET_KEY
+
+# 3) Aplicar esquema y correr:
+alembic upgrade head   # (en dev, run.py lo hace solo)
+python run.py          # http://127.0.0.1:8000
 ```
 
-El schema de la BD se crea automáticamente con `db.create_all()` (no hay migraciones).
+## Migraciones (Alembic)
+
+El esquema **solo** cambia vía migraciones; nunca a mano ni con `db.create_all()`.
+
+```bash
+alembic upgrade head          # aplicar pendentes
+alembic downgrade -1          # revertir la última
+alembic revision --autogenerate -m "descripcion"   # tras editar modelos
+```
+
+Hay una `naming convention` global en `app/extensions.py` (ix_/uq_/ck_/fk_/pk_) para
+que los nombres sean estables y el autogenerate genere diffs limpios. **Revisá siempre**
+la migración generada antes de aplicarla. En desarrollo, `run.py` ejecuta
+`alembic upgrade head` automáticamente al arrancar.
 
 ## Desarrollo
 
 ```bash
-ruff check .                # lint
-pytest                       # tests
+ruff check .                 # lint
+pytest                       # tests (usan PostgreSQL en TEST_DATABASE_URL,
+                             # crean las tablas con las migraciones y
+                             # truncan entre tests)
 ```
 
 ## Endpoints (`/api/v1`)
@@ -1451,53 +2722,74 @@ pytest                       # tests
 | POST | `/stores` | Crear tienda (`name`, `description`, `currency`, `logo`) |
 | GET | `/stores/<id>` | Obtener tienda |
 | PATCH | `/stores/<id>` | Actualizar (parcial) |
-| DELETE | `/stores/<id>` | Eliminar (cascada: productos + media) |
+| DELETE | `/stores/<id>` | Eliminar (cascada: productos e imágenes → huérfanas) |
 
 ### Products
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/stores/<sid>/products` | Listar (query: `search`, `published`, `page`, `per_page`) |
-| POST | `/stores/<sid>/products` | Crear producto |
+| POST | `/stores/<sid>/products` | Crear producto (máx. 12 imágenes, URLs ya subidas) |
 | GET | `/stores/<sid>/products/<pid>` | Obtener (valida store_id) |
 | GET | `/products/<pid>` | Obtener por id (lookup de carrito) |
-| PATCH | `/products/<pid>` | Actualizar (parcial: `published`, `stock`, etc.) |
-| DELETE | `/products/<pid>` | Eliminar (+ borrar media) |
+| PATCH | `/products/<pid>` | Actualizar (parcial: `published`, `stock`, `images`, etc.) |
+| DELETE | `/products/<pid>` | Eliminar (sus assets sin uso pasan a `orphan`) |
 
 ### Media
 | Método | Ruta | Descripción |
 |---|---|---|
-| POST | `/media` | Subir imagen (multipart `file`) → `{ url, filename }` |
+| POST | `/media` | Subir imagen (multipart `file`) → `{ url, filename }` + registro `media_asset` |
 | GET | `/media/<filename>` | Servir imagen |
 | GET | `/health` | Estado del servicio |
 
-## Seguridad
-- Validación estricta con marshmallow (tipos, rangos, whitelists de moneda)
+**Regla estricta de imágenes**: los `images`/`logo` de productos y tiendas deben ser
+URLs previamente subidas por `POST /media` (existen en `media_assets`); cualquier otra
+devuelve 422.
+
+## Integridad y borrado seguro
+
+- Checks en base: `price >= 0`, `stock >= 0`, nombre no vacío, moneda en whitelist,
+  `position >= 0`, `size_bytes >= 0`, `status IN ('active','orphan','deleted')`.
+- FKs: `products→stores` CASCADE; `product_images→products` CASCADE;
+  `product_images→media_assets` **RESTRICT**; `stores.logo_asset_id→media_assets` SET NULL.
+- Borrar una entidad nunca borra archivos físicos en uso: los assets quedan `orphan`
+  y se limpian explícitamente:
+
+```bash
+flask --app run.py media cleanup --grace-days 7   # borra archivos huérfanos antiguos
+```
+
+## Seguridad de datos
+- Credenciales solo por `.env` (nunca hardcodear)
+- Validación doble: marshmallow + constraints en base
 - CORS bloqueado a `FRONTEND_ORIGIN`
 - Imágenes validadas con Pillow (MIME real, no extensión), re-encodeadas a JPEG
 - Nombres de archivo UUID + protección contra path traversal
-- Respuestas de error JSON uniformes; sin traces en producción
-- `SECRET_KEY` y config vía variables de entorno
+- Errores JSON uniformes; sin traces en producción
 
-## Cambiar a PostgreSQL
-Edita `.env`:
+## Backups (PostgreSQL)
+
+```bash
+pg_dump -Fc cretienda_dev > backups/cretienda-$(date +%F).dump
+pg_restore -d cretienda_dev --clean backups/cretienda-XXXX.dump
 ```
-DATABASE_URL=postgresql+psycopg2://user:pass@host/db
-```
-Y añade `psycopg2-binary` a `requirements.txt`. La capa de repositorios no cambia.
+Programar diario en producción y **probar el restore** periódicamente.
 
 ## Estructura
 ```
+alembic.ini              # config Alembic
+migrations/              # env.py + versions/ (0001→0003)
 app/
-├── __init__.py      # create_app() factory
-├── config.py        # config desde .env
-├── extensions.py    # db, cors
-├── errors.py        # handlers JSON
-├── api/v1/          # blueprints stores/products/media
-├── models/          # Store, Product (SQLAlchemy)
-├── repositories/    # Repository[T] abstracto (espejo del frontend)
-├── schemas/         # marshmallow
-├── services/        # lógica de negocio (cascade, Pillow)
-└── utils/           # paginación
+├── __init__.py          # create_app() factory (sin create_all)
+├── cli.py               # flask media cleanup
+├── config.py            # config desde .env (dev/test/prod)
+├── extensions.py        # db (naming convention), cors, PRAGMA FK sqlite
+├── errors.py            # handlers JSON
+├── api/v1/              # blueprints stores/products/media
+├── models/              # Store, Product, MediaAsset, ProductImage
+├── repositories/        # Repository[T] abstracto
+├── schemas/             # marshmallow
+├── services/            # negocio: productos, tiendas, media (assets + huérfanos)
+└── utils/               # paginación
 ```
 </file>
 
@@ -1516,21 +2808,40 @@ SQLAlchemy>=2.0,<3.0
 marshmallow>=3.20,<4.0
 python-dotenv>=1.0
 Pillow>=10.0
+Alembic>=1.13
+psycopg2-binary>=2.9
 </file>
 
 <file path="backend/run.py">
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
+from alembic import command  # noqa: E402
+from alembic.config import Config as AlembicConfig  # noqa: E402
+
 from app import create_app  # noqa: E402
 from app.config import DevConfig, ProdConfig  # noqa: E402
+
+BASE_DIR = Path(__file__).resolve().parent
+
+
+def run_migrations() -> None:
+    """Aplica las migraciones pendiente antes de servir (flujo de desarrollo)."""
+    cfg = AlembicConfig(str(BASE_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BASE_DIR / "migrations"))
+    command.upgrade(cfg, "head")
+
 
 env = os.environ.get("FLASK_ENV", "development")
 configs = {"development": DevConfig, "production": ProdConfig}
 config = configs.get(env, DevConfig)
+
+if config is DevConfig:
+    run_migrations()
 
 app = create_app(config)
 
@@ -1539,6 +2850,86 @@ if __name__ == "__main__":
         host=os.environ.get("HOST", "127.0.0.1"),
         port=int(os.environ.get("PORT", "8000")),
     )
+</file>
+
+<file path="public/favicon.svg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect x="1" y="1" width="30" height="30" rx="6" fill="#0a0a0a" />
+  <g transform="translate(4 4)" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m3 9 1.5-6h15L21 9" />
+    <path d="M4 9v11h16V9" />
+    <path d="M9 20v-6h6v6" />
+    <path d="M2 9h20" />
+  </g>
+</svg>
+</file>
+
+<file path="src/app/routes.tsx">
+import { Route, Routes } from 'react-router-dom'
+import { StoreDashboardLayout } from '@/features/merchant/stores/layouts/StoreDashboardLayout'
+import { StoresListPage } from '@/features/merchant/stores/pages/StoresListPage'
+import { CreateStorePage } from '@/features/merchant/stores/pages/CreateStorePage'
+import { StoreOverviewPage } from '@/features/merchant/stores/pages/StoreOverviewPage'
+import { SettingsPage } from '@/features/merchant/admin/pages/SettingsPage'
+import { ProductsPage } from '@/features/merchant/admin/pages/ProductsPage'
+import { ProductFormPage } from '@/features/merchant/admin/pages/ProductFormPage'
+import { InventoryPage } from '@/features/merchant/admin/pages/InventoryPage'
+import { StatisticsPage } from '@/features/merchant/statistics/pages/StatisticsPage'
+import { StorefrontLayout } from '@/features/customer/storefront/pages/StorefrontLayout'
+import { CatalogPage } from '@/features/customer/catalog/pages/CatalogPage'
+import { ProductDetailPage } from '@/features/customer/product-viewer/pages/ProductDetailPage'
+import { CartPage } from '@/features/customer/cart/pages/CartPage'
+import { NotFoundPage } from '@/app/pages/NotFoundPage'
+
+export function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<StoresListPage />} />
+      <Route path="/stores/new" element={<CreateStorePage />} />
+
+      <Route path="/stores/:storeId" element={<StoreDashboardLayout />}>
+        <Route index element={<StoreOverviewPage />} />
+        <Route path="products" element={<ProductsPage />} />
+        <Route path="products/new" element={<ProductFormPage />} />
+        <Route path="products/:productId" element={<ProductFormPage />} />
+        <Route path="inventory" element={<InventoryPage />} />
+        <Route path="statistics" element={<StatisticsPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+      </Route>
+
+      <Route path="/shop/:storeId" element={<StorefrontLayout />}>
+        <Route index element={<CatalogPage />} />
+        <Route path="products/:productId" element={<ProductDetailPage />} />
+        <Route path="cart" element={<CartPage />} />
+      </Route>
+
+      <Route path="*" element={<NotFoundPage />} />
+    </Routes>
+  )
+}
+</file>
+
+<file path="src/config/constants.ts">
+export const APP_NAME = 'CreaTienda'
+export const DEFAULT_CURRENCY = 'USD'
+export const LOW_STOCK_THRESHOLD = 5
+
+export const CURRENCIES = [
+  'USD',
+  'EUR',
+  'MXN',
+  'COP',
+  'ARS',
+  'CLP',
+  'PEN',
+  'BOB',
+  'UYU',
+  'VES',
+  'DOP',
+  'CRC',
+  'GTQ',
+  'PAB',
+] as const
 </file>
 
 <file path="src/data/api/client.ts">
@@ -1627,6 +3018,480 @@ export function mediaUrl(url: string | null | undefined): string {
 }
 </file>
 
+<file path="src/features/customer/product-viewer/components/ImageGallery.tsx">
+import { useState } from 'react'
+import { IconChevronLeft, IconChevronRight, IconImage } from '@/shared/ui/icons'
+import { cn } from '@/shared/utils/cn'
+
+interface ImageGalleryProps {
+  images: string[]
+  name: string
+}
+
+export function ImageGallery({ images, name }: ImageGalleryProps) {
+  const [index, setIndex] = useState(0)
+
+  if (images.length === 0) {
+    return (
+      <div className="flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-muted">
+        <IconImage width={32} height={32} />
+        <span className="text-xs">Este producto no tiene fotos</span>
+      </div>
+    )
+  }
+
+  const safeIndex = Math.min(index, images.length - 1)
+  const move = (delta: number) =>
+    setIndex((safeIndex + delta + images.length) % images.length)
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="relative aspect-square w-full overflow-hidden rounded-lg border border-line bg-bg">
+        <img
+          src={images[safeIndex]}
+          alt={`${name}, foto ${safeIndex + 1} de ${images.length}`}
+          className="h-full w-full object-contain"
+        />
+        {images.length > 1 ? (
+          <>
+            <button
+              type="button"
+              aria-label="Foto anterior"
+              onClick={() => move(-1)}
+              className="absolute left-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-line bg-bg/80 hover:bg-accent hover:text-accent-fg"
+            >
+              <IconChevronLeft />
+            </button>
+            <button
+              type="button"
+              aria-label="Foto siguiente"
+              onClick={() => move(1)}
+              className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-line bg-bg/80 hover:bg-accent hover:text-accent-fg"
+            >
+              <IconChevronRight />
+            </button>
+            <span className="absolute bottom-2 right-2 rounded-full border border-line bg-bg/80 px-2 py-0.5 text-xs">
+              {safeIndex + 1} / {images.length}
+            </span>
+          </>
+        ) : null}
+      </div>
+
+      {images.length > 1 ? (
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {images.map((image, position) => (
+            <button
+              key={`${position}-${image.slice(-24)}`}
+              type="button"
+              onClick={() => setIndex(position)}
+              aria-label={`Ver foto ${position + 1}`}
+              className={cn(
+                'h-14 w-14 shrink-0 overflow-hidden rounded-md border transition-opacity',
+                position === safeIndex
+                  ? 'border-fg ring-1 ring-fg'
+                  : 'border-line opacity-60 hover:opacity-100',
+              )}
+            >
+              <img src={image} alt="" className="h-full w-full object-cover" />
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+</file>
+
+<file path="src/features/merchant/statistics/pages/StatisticsPage.tsx">
+import { Link, useParams } from 'react-router-dom'
+import { Badge } from '@/shared/ui/Badge'
+import { buttonClasses } from '@/shared/ui/Button'
+import { Card } from '@/shared/ui/Card'
+import { EmptyState } from '@/shared/ui/EmptyState'
+import { IconChart } from '@/shared/ui/icons'
+
+const plannedFeatures = [
+  'Ventas por período',
+  'Productos más vendidos',
+  'Productos más visitados',
+  'Horarios de mayor tráfico',
+  'Exportación a XLSX',
+  'Imagen de gráficas',
+]
+
+export function StatisticsPage() {
+  const { storeId } = useParams<{ storeId: string }>()
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-xl font-semibold">Estadísticas</h1>
+        <p className="text-sm text-muted">
+          Métricas y reportes visuales del rendimiento de esta tienda.
+        </p>
+      </div>
+
+      <EmptyState
+        icon={<IconChart width={32} height={32} />}
+        title="Módulo en desarrollo"
+        description="La sección de estadísticas comerciales generará gráficas a partir de los datos que acumule esta tienda: ventas, visitas y productos destacados. Estará disponible en la siguiente fase del proyecto."
+        action={
+          <Link to=".." className={buttonClasses('outline', 'md')}>
+            Volver al resumen
+          </Link>
+        }
+      />
+
+      <Card className="p-5">
+        <h2 className="mb-3 text-sm font-semibold">Funcionalidades reservadas</h2>
+        <div className="flex flex-wrap gap-2">
+          {plannedFeatures.map((feature) => (
+            <Badge key={feature} variant="muted">
+              {feature}
+            </Badge>
+          ))}
+        </div>
+      </Card>
+
+      <p className="text-center text-xs text-muted">
+        ID de tienda para integración futura: {storeId}
+      </p>
+    </div>
+  )
+}
+</file>
+
+<file path="src/features/merchant/stores/components/MerchantHeader.tsx">
+import { Link } from 'react-router-dom'
+import { APP_NAME } from '@/config/constants'
+import { IconStore } from '@/shared/ui/icons'
+import { ThemeToggle } from '@/shared/ui/ThemeToggle'
+
+export function MerchantHeader() {
+  return (
+    <header className="border-b border-line">
+      <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between px-4">
+        <Link to="/" className="flex items-center gap-2 font-semibold">
+          <span className="flex h-7 w-7 items-center justify-center rounded-md border border-line">
+            <IconStore />
+          </span>
+          {APP_NAME}
+        </Link>
+        <ThemeToggle />
+      </div>
+    </header>
+  )
+}
+</file>
+
+<file path="src/shared/hooks/useBodyScrollLock.ts">
+import { useEffect } from 'react'
+
+export function useBodyScrollLock(active: boolean): void {
+  useEffect(() => {
+    if (!active) return
+    const originalOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = originalOverflow
+    }
+  }, [active])
+}
+</file>
+
+<file path="src/shared/hooks/useDevice.ts">
+import { useMediaQuery } from './useMediaQuery'
+
+export function useIsMobile(): boolean {
+  return useMediaQuery('(max-width: 767px)')
+}
+
+export function useIsDesktop(): boolean {
+  return useMediaQuery('(min-width: 1024px)')
+}
+
+export function useDeviceType() {
+  const isMobile = useMediaQuery('(max-width: 767px)')
+  const isTablet = useMediaQuery('(min-width: 768px) and (max-width: 1023px)')
+  if (isMobile) return 'mobile' as const
+  if (isTablet) return 'tablet' as const
+  return 'desktop' as const
+}
+
+export function useIsTouch(): boolean {
+  const coarsePointer = useMediaQuery('(pointer: coarse)')
+  if (typeof window === 'undefined') return false
+  return coarsePointer || (navigator.maxTouchPoints ?? 0) > 0
+}
+</file>
+
+<file path="src/shared/hooks/useMediaQuery.ts">
+import { useEffect, useState } from 'react'
+
+export function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(query).matches : false,
+  )
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mql = window.matchMedia(query)
+    const handler = (event: MediaQueryListEvent) => setMatches(event.matches)
+    setMatches(mql.matches)
+    mql.addEventListener('change', handler)
+    return () => mql.removeEventListener('change', handler)
+  }, [query])
+
+  return matches
+}
+</file>
+
+<file path="src/shared/types/domain.ts">
+export interface Store {
+  id: string
+  name: string
+  description: string
+  currency: string
+  logo: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export type NewStore = Omit<Store, 'id' | 'createdAt' | 'updatedAt'>
+
+export interface Product {
+  id: string
+  storeId: string
+  name: string
+  description: string
+  price: number
+  stock: number
+  images: string[]
+  published: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export type NewProduct = Omit<Product, 'id' | 'createdAt' | 'updatedAt'>
+
+export interface CartItem {
+  productId: string
+  quantity: number
+}
+</file>
+
+<file path="src/shared/ui/Button.tsx">
+import { forwardRef, type ButtonHTMLAttributes } from 'react'
+import { cn } from '@/shared/utils/cn'
+
+export type ButtonVariant = 'primary' | 'outline' | 'ghost'
+export type ButtonSize = 'sm' | 'md' | 'lg'
+
+const base =
+  'inline-flex items-center justify-center gap-2 rounded-md border font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fg/40 disabled:pointer-events-none disabled:opacity-40 select-none'
+
+const variants: Record<ButtonVariant, string> = {
+  primary: 'border-line bg-accent text-accent-fg hover:opacity-80',
+  outline: 'border-line bg-transparent text-fg hover:bg-accent hover:text-accent-fg',
+  ghost: 'border-transparent text-fg hover:bg-fg/10',
+}
+
+const sizes: Record<ButtonSize, string> = {
+  sm: 'h-8 px-3 text-xs',
+  md: 'h-10 px-4 text-sm',
+  lg: 'h-11 px-6 text-sm',
+}
+
+export function buttonClasses(
+  variant: ButtonVariant = 'primary',
+  size: ButtonSize = 'md',
+  className?: string,
+): string {
+  return cn(base, variants[variant], sizes[size], className)
+}
+
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: ButtonVariant
+  size?: ButtonSize
+}
+
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { className, variant = 'primary', size = 'md', type = 'button', ...props },
+  ref,
+) {
+  return <button ref={ref} type={type} className={buttonClasses(variant, size, className)} {...props} />
+})
+</file>
+
+<file path="src/shared/ui/Card.tsx">
+import type { HTMLAttributes } from 'react'
+import { cn } from '@/shared/utils/cn'
+
+export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={cn('rounded-lg border border-line bg-surface', className)}
+      {...props}
+    />
+  )
+}
+</file>
+
+<file path="src/shared/ui/ConfirmDialog.tsx">
+import { Button } from './Button'
+import { Modal } from './Modal'
+
+interface ConfirmDialogProps {
+  open: boolean
+  onClose: () => void
+  onConfirm: () => void
+  title: string
+  message: string
+  confirmLabel?: string
+  cancelLabel?: string
+}
+
+export function ConfirmDialog({
+  open,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmLabel = 'Confirmar',
+  cancelLabel = 'Cancelar',
+}: ConfirmDialogProps) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={title}
+      footer={
+        <>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            {cancelLabel}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              onConfirm()
+              onClose()
+            }}
+          >
+            {confirmLabel}
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-muted">{message}</p>
+    </Modal>
+  )
+}
+</file>
+
+<file path="src/shared/ui/EmptyState.tsx">
+import type { ReactNode } from 'react'
+import { cn } from '@/shared/utils/cn'
+
+interface EmptyStateProps {
+  title: string
+  description?: string
+  action?: ReactNode
+  icon?: ReactNode
+  className?: string
+}
+
+export function EmptyState({
+  title,
+  description,
+  action,
+  icon,
+  className,
+}: EmptyStateProps) {
+  return (
+    <div
+      className={cn(
+        'flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-line px-6 py-14 text-center',
+        className,
+      )}
+    >
+      {icon ? <div className="text-muted">{icon}</div> : null}
+      <h3 className="text-base font-semibold">{title}</h3>
+      {description ? (
+        <p className="max-w-sm text-sm text-muted">{description}</p>
+      ) : null}
+      {action ? <div className="mt-2">{action}</div> : null}
+    </div>
+  )
+}
+</file>
+
+<file path="src/shared/ui/Label.tsx">
+import type { LabelHTMLAttributes } from 'react'
+import { cn } from '@/shared/utils/cn'
+
+export function Label({ className, ...props }: LabelHTMLAttributes<HTMLLabelElement>) {
+  return (
+    <label className={cn('mb-1.5 block text-sm font-medium', className)} {...props} />
+  )
+}
+</file>
+
+<file path="src/shared/ui/QuantityStepper.tsx">
+import { IconMinus, IconPlus } from './icons'
+
+interface QuantityStepperProps {
+  value: number
+  onChange: (value: number) => void
+  min?: number
+  max?: number
+}
+
+export function QuantityStepper({
+  value,
+  onChange,
+  min = 1,
+  max = Number.MAX_SAFE_INTEGER,
+}: QuantityStepperProps) {
+  const clamp = (next: number) => Math.min(max, Math.max(min, next))
+
+  return (
+    <div className="inline-flex h-10 items-center rounded-md border border-line">
+      <button
+        type="button"
+        aria-label="Restar"
+        disabled={value <= min}
+        onClick={() => onChange(clamp(value - 1))}
+        className="flex h-full w-9 items-center justify-center disabled:opacity-30 hover:bg-fg/10"
+      >
+        <IconMinus />
+      </button>
+      <input
+        type="number"
+        aria-label="Cantidad"
+        value={value}
+        min={min}
+        max={max}
+        onChange={(event) => {
+          const parsed = Number(event.target.value)
+          if (Number.isFinite(parsed)) onChange(clamp(parsed))
+        }}
+        className="h-full w-12 border-x border-line bg-transparent text-center text-sm focus:outline-none"
+      />
+      <button
+        type="button"
+        aria-label="Sumar"
+        disabled={value >= max}
+        onClick={() => onChange(clamp(value + 1))}
+        className="flex h-full w-9 items-center justify-center disabled:opacity-30 hover:bg-fg/10"
+      >
+        <IconPlus />
+      </button>
+    </div>
+  )
+}
+</file>
+
 <file path="src/shared/ui/Spinner.tsx">
 import { cn } from '@/shared/utils/cn'
 
@@ -1658,6 +3523,209 @@ export function Spinner({ label = 'Cargando…', full = false, className }: Spin
 }
 </file>
 
+<file path="src/shared/ui/ThemeToggle.tsx">
+import { useUIStore } from '@/store/uiStore'
+import { cn } from '@/shared/utils/cn'
+import { IconMoon, IconSun } from './icons'
+
+export function ThemeToggle({ className }: { className?: string }) {
+  const theme = useUIStore((state) => state.theme)
+  const toggleTheme = useUIStore((state) => state.toggleTheme)
+
+  return (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+      title={theme === 'dark' ? 'Modo claro' : 'Modo oscuro'}
+      className={cn(
+        'inline-flex h-9 w-9 items-center justify-center rounded-md border border-line transition-colors hover:bg-accent hover:text-accent-fg',
+        className,
+      )}
+    >
+      {theme === 'dark' ? <IconMoon width={17} height={17} /> : <IconSun width={17} height={17} />}
+    </button>
+  )
+}
+</file>
+
+<file path="src/shared/utils/cn.ts">
+export function cn(...parts: Array<string | false | null | undefined>): string {
+  return parts.filter(Boolean).join(' ')
+}
+</file>
+
+<file path="src/shared/utils/device.ts">
+export type DeviceType = 'mobile' | 'tablet' | 'desktop'
+
+export const BREAKPOINTS = {
+  mobileMax: 767,
+  tabletMax: 1023,
+} as const
+
+function matches(query: string): boolean {
+  return typeof window !== 'undefined' && window.matchMedia(query).matches
+}
+
+export function isMobileViewport(): boolean {
+  return matches(`(max-width: ${BREAKPOINTS.mobileMax}px)`)
+}
+
+export function isTabletViewport(): boolean {
+  return matches(
+    `(min-width: ${BREAKPOINTS.mobileMax + 1}px) and (max-width: ${BREAKPOINTS.tabletMax}px)`,
+  )
+}
+
+export function isDesktopViewport(): boolean {
+  return matches(`(min-width: ${BREAKPOINTS.tabletMax + 1}px)`)
+}
+
+export function getDeviceType(): DeviceType {
+  if (isMobileViewport()) return 'mobile'
+  if (isTabletViewport()) return 'tablet'
+  return 'desktop'
+}
+
+export function isTouchDevice(): boolean {
+  if (typeof window === 'undefined') return false
+  const maxTouchPoints = navigator.maxTouchPoints ?? 0
+  return matches('(pointer: coarse)') || maxTouchPoints > 0
+}
+</file>
+
+<file path="src/shared/utils/format.ts">
+export function formatPrice(value: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat('es', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 2,
+    }).format(value)
+  } catch {
+    return `${currency} ${value.toFixed(2)}`
+  }
+}
+
+export function formatDate(timestamp: number): string {
+  return new Intl.DateTimeFormat('es', { dateStyle: 'medium' }).format(
+    new Date(timestamp),
+  )
+}
+
+export function parsePrice(raw: string): number | null {
+  const normalized = raw.replace(',', '.').trim()
+  if (normalized === '') return null
+  const value = Number(normalized)
+  if (!Number.isFinite(value) || value < 0) return null
+  return Math.round(value * 100) / 100
+}
+
+export function parseStock(raw: string): number | null {
+  const value = Number(raw.trim())
+  if (!Number.isInteger(value) || value < 0) return null
+  return value
+}
+</file>
+
+<file path="src/store/cartStore.ts">
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+import { storageKey } from '@/data/storage/localStorageAdapter'
+import type { CartItem } from '@/shared/types/domain'
+
+interface CartState {
+  itemsByStore: Record<string, CartItem[]>
+  addItem: (storeId: string, productId: string, quantity?: number) => void
+  setQuantity: (storeId: string, productId: string, quantity: number) => void
+  removeItem: (storeId: string, productId: string) => void
+  clearStore: (storeId: string) => void
+}
+
+const EMPTY_ITEMS: CartItem[] = []
+
+export const useCartStore = create<CartState>()(
+  persist(
+    (set) => ({
+      itemsByStore: {},
+
+      addItem: (storeId, productId, quantity = 1) =>
+        set((state) => {
+          const items = state.itemsByStore[storeId] ?? []
+          const existing = items.find((item) => item.productId === productId)
+          const next = existing
+            ? items.map((item) =>
+                item.productId === productId
+                  ? { ...item, quantity: item.quantity + quantity }
+                  : item,
+              )
+            : [...items, { productId, quantity }]
+          return { itemsByStore: { ...state.itemsByStore, [storeId]: next } }
+        }),
+
+      setQuantity: (storeId, productId, quantity) =>
+        set((state) => {
+          const items = state.itemsByStore[storeId] ?? []
+          const next =
+            quantity <= 0
+              ? items.filter((item) => item.productId !== productId)
+              : items.map((item) =>
+                  item.productId === productId ? { ...item, quantity } : item,
+                )
+          return { itemsByStore: { ...state.itemsByStore, [storeId]: next } }
+        }),
+
+      removeItem: (storeId, productId) =>
+        set((state) => {
+          const items = state.itemsByStore[storeId] ?? []
+          return {
+            itemsByStore: {
+              ...state.itemsByStore,
+              [storeId]: items.filter((item) => item.productId !== productId),
+            },
+          }
+        }),
+
+      clearStore: (storeId) =>
+        set((state) => {
+          const next = { ...state.itemsByStore }
+          delete next[storeId]
+          return { itemsByStore: next }
+        }),
+    }),
+    { name: storageKey('cart') },
+  ),
+)
+
+export function useCartItems(storeId: string | undefined): CartItem[] {
+  return useCartStore((state) =>
+    storeId ? (state.itemsByStore[storeId] ?? EMPTY_ITEMS) : EMPTY_ITEMS,
+  )
+}
+</file>
+
+<file path="src/theme/ThemeProvider.tsx">
+import { useEffect, type ReactNode } from 'react'
+import { useUIStore } from '@/store/uiStore'
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+  const theme = useUIStore((state) => state.theme)
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+  }, [theme])
+
+  return <>{children}</>
+}
+</file>
+
+<file path=".gitignore">
+node_modules
+dist
+*.local
+.DS_Store
+</file>
+
 <file path="AGENTS.md">
 # CreaTienda — AGENTS.md
 
@@ -1665,9 +3733,10 @@ Proyecto SaaS único con dos partes en el mismo repo. Todo (código, comentarios
 commits) está en **español**.
 
 - Raíz: frontend React 18 + TypeScript + Vite + Tailwind + Zustand (`src/`).
-- `backend/`: API REST Flask + SQLAlchemy (SQLite por defecto) que **es la fuente de
-  verdad de stores y productos**. El frontend ya NO usa localStorage para datos de
-  dominio; solo el carrito (`cartStore`) y el tema (`uiStore`) siguen en localStorage.
+- `backend/`: API REST Flask + SQLAlchemy sobre **PostgreSQL** (esquema versionado con
+  Alembic) que **es la fuente de verdad de stores, productos y media**. El frontend ya NO
+  usa localStorage para datos de dominio; solo el carrito (`cartStore`) y el tema
+  (`uiStore`) siguen en localStorage.
 
 ## Comandos
 
@@ -1680,12 +3749,12 @@ Frontend (raíz):
 - `npm run build` (corre `tsc --noEmit && vite build`) · `npm run typecheck` para solo tipos.
 - No hay linter ni tests de frontend; `tsc` es estricto (`noUnusedLocals`/`noUnusedParameters`): el código muerto rompe el build.
 
-Backend (`cd backend`, Python 3.11+):
-- Setup: `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt -r requirements-dev.txt && cp .env.example .env`
-- Correr: `python run.py` → http://127.0.0.1:8000 (`FLASK_ENV` elige `DevConfig`/`ProdConfig`).
+Backend (`cd backend`, Python 3.11+ y PostgreSQL 14+):
+- Setup: `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt -r requirements-dev.txt && cp .env.example .env`; además hacen falta el rol `cretienda` (con `CREATEDB`) y las BDs `cretienda_dev` + `cretienda_test` (ver `backend/README.md`).
+- Correr: `python run.py` → http://127.0.0.1:8000 (`FLASK_ENV` elige `DevConfig`/`ProdConfig`). En dev ejecuta `alembic upgrade head` solo al arrancar.
 - `ruff check .` (line-length 100) · `pytest` · un archivo: `pytest tests/test_stores.py`.
-- Sin migraciones: el schema se crea con `db.create_all()`; tras cambiar modelos, borra `backend/instance/app.db`.
-- Tests usan fixtures `app`/`client`/`make_store` de `backend/tests/conftest.py` (sqlite + media en tmp_path).
+- Migraciones con Alembic (`backend/migrations/`): cambiar modelos → `alembic revision --autogenerate -m "..."` → revisar → `alembic upgrade head`. **Nunca** `db.create_all()` ni SQL manual. Hay naming convention global en `app/extensions.py`.
+- Tests: corren contra PostgreSQL (`TEST_DATABASE_URL`), aplican las migraciones y truncan entre tests; fixtures `app`/`client`/`make_store`/`upload_image` de `backend/tests/conftest.py`.
 
 ## Arquitectura frontend (no obvia por nombres de carpeta)
 
@@ -1701,7 +3770,12 @@ Backend (`cd backend`, Python 3.11+):
   localmente hay que limpiar productos y carrito de esa tienda.
 - Imágenes: se suben a `POST /media` (multipart `file`) y se guarda la `url` devuelta
   (`/media/<uuid>.jpg`) absolutizada con `mediaUrl()` del client; ya NO se guardan dataURL
-  en el navegador. El backend valida con Pillow y re-encodea a JPEG.
+  en el navegador. El backend valida con Pillow, re-encodea a JPEG y **registra cada archivo
+  en `media_assets`**. Los `images`/`logo` de productos/tiendas son estrictos: solo URLs ya
+  subidas existen (si no, 422); las imágenes viven normalizadas en `product_images`
+  (orden por `position`, la de position 0 es la portada). Borrar entidad NO borra archivos:
+  los assets sin referencias pasan a `orphan` y se limpian con
+  `flask --app run.py media cleanup --grace-days N`.
 - Rutas: TODA página debe registrarse en `src/app/routes.tsx`. Panel merchant bajo
   `/stores/:storeId/...`, tienda pública bajo `/shop/:storeId`.
 - Alias `@/` → `src/`, declarado en `vite.config.ts` Y `tsconfig.json`.
@@ -1729,7 +3803,11 @@ Backend (`cd backend`, Python 3.11+):
   `{ "error": { "code", "message" } }` (`app/errors.py`). Whitelist de monedas en
   `app/config.py::CURRENCIES` = `src/config/constants.ts::CURRENCIES` (mantener sincronizadas).
 - CORS limitado a `FRONTEND_ORIGIN`; config desde `.env` (dotenv se carga en `run.py` antes
-  de importar `app`). Para PostgreSQL: solo cambiar `DATABASE_URL` + `psycopg2-binary`.
+  de importar `app`). BD: `DATABASE_URL` (dev/prod) y `TEST_DATABASE_URL` (pytest); el rol
+  de BD necesita `CREATEDB` para el test de migraciones.
+- Integridad ALSO en base: checks (`price/stock >= 0`, nombre no vacío, moneda whitelist) y
+  FKs con reglas específicas: `product_images→media_assets` RESTRICT (no borrar assets en
+  uso), `stores.logo_asset_id` SET NULL, `products→stores` CASCADE.
 </file>
 
 <file path="app.py">
@@ -1802,7 +3880,7 @@ def check_dependencies(python: Path | str) -> None:
             ]
         )
     probe = subprocess.run(
-        [str(python), "-c", "import flask, flask_sqlalchemy, marshmallow, PIL, dotenv"],
+        [str(python), "-c", "import flask, flask_sqlalchemy, marshmallow, PIL, dotenv, alembic, psycopg2"],
         capture_output=True,
         text=True,
         cwd=BACKEND,
@@ -1903,6 +3981,72 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+</file>
+
+<file path="package.json">
+{
+  "name": "creatienda",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.1",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.5.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "~5.7.2",
+    "vite": "^6.3.5"
+  }
+}
+</file>
+
+<file path="postcss.config.js">
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}
 </file>
 
 <file path="docs/COMPONENTES.txt">
@@ -2148,16 +4292,28 @@ Constantes         — src/config/constants.ts        — APP_NAME "CreaTienda",
 ================================================================================
 </file>
 
-<file path="public/favicon.svg">
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect x="1" y="1" width="30" height="30" rx="6" fill="#0a0a0a" />
-  <g transform="translate(4 4)" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-    <path d="m3 9 1.5-6h15L21 9" />
-    <path d="M4 9v11h16V9" />
-    <path d="M9 20v-6h6v6" />
-    <path d="M2 9h20" />
-  </g>
-</svg>
+<file path="src/app/pages/NotFoundPage.tsx">
+import { Link } from 'react-router-dom'
+import { buttonClasses } from '@/shared/ui/Button'
+import { EmptyState } from '@/shared/ui/EmptyState'
+import { IconAlert } from '@/shared/ui/icons'
+
+export function NotFoundPage() {
+  return (
+    <div className="flex min-h-[100dvh] items-center justify-center p-6">
+      <EmptyState
+        icon={<IconAlert width={28} height={28} />}
+        title="Página no encontrada"
+        description="La ruta que buscas no existe o la tienda fue eliminada."
+        action={
+          <Link to="/" className={buttonClasses('primary', 'md')}>
+            Ir a mis tiendas
+          </Link>
+        }
+      />
+    </div>
+  )
+}
 </file>
 
 <file path="src/app/App.tsx">
@@ -2185,74 +4341,6 @@ export default function App() {
     </ThemeProvider>
   )
 }
-</file>
-
-<file path="src/app/routes.tsx">
-import { Route, Routes } from 'react-router-dom'
-import { StoreDashboardLayout } from '@/features/merchant/stores/layouts/StoreDashboardLayout'
-import { StoresListPage } from '@/features/merchant/stores/pages/StoresListPage'
-import { CreateStorePage } from '@/features/merchant/stores/pages/CreateStorePage'
-import { StoreOverviewPage } from '@/features/merchant/stores/pages/StoreOverviewPage'
-import { SettingsPage } from '@/features/merchant/admin/pages/SettingsPage'
-import { ProductsPage } from '@/features/merchant/admin/pages/ProductsPage'
-import { ProductFormPage } from '@/features/merchant/admin/pages/ProductFormPage'
-import { InventoryPage } from '@/features/merchant/admin/pages/InventoryPage'
-import { StatisticsPage } from '@/features/merchant/statistics/pages/StatisticsPage'
-import { StorefrontLayout } from '@/features/customer/storefront/pages/StorefrontLayout'
-import { CatalogPage } from '@/features/customer/catalog/pages/CatalogPage'
-import { ProductDetailPage } from '@/features/customer/product-viewer/pages/ProductDetailPage'
-import { CartPage } from '@/features/customer/cart/pages/CartPage'
-import { NotFoundPage } from '@/app/pages/NotFoundPage'
-
-export function AppRoutes() {
-  return (
-    <Routes>
-      <Route path="/" element={<StoresListPage />} />
-      <Route path="/stores/new" element={<CreateStorePage />} />
-
-      <Route path="/stores/:storeId" element={<StoreDashboardLayout />}>
-        <Route index element={<StoreOverviewPage />} />
-        <Route path="products" element={<ProductsPage />} />
-        <Route path="products/new" element={<ProductFormPage />} />
-        <Route path="products/:productId" element={<ProductFormPage />} />
-        <Route path="inventory" element={<InventoryPage />} />
-        <Route path="statistics" element={<StatisticsPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-      </Route>
-
-      <Route path="/shop/:storeId" element={<StorefrontLayout />}>
-        <Route index element={<CatalogPage />} />
-        <Route path="products/:productId" element={<ProductDetailPage />} />
-        <Route path="cart" element={<CartPage />} />
-      </Route>
-
-      <Route path="*" element={<NotFoundPage />} />
-    </Routes>
-  )
-}
-</file>
-
-<file path="src/config/constants.ts">
-export const APP_NAME = 'CreaTienda'
-export const DEFAULT_CURRENCY = 'USD'
-export const LOW_STOCK_THRESHOLD = 5
-
-export const CURRENCIES = [
-  'USD',
-  'EUR',
-  'MXN',
-  'COP',
-  'ARS',
-  'CLP',
-  'PEN',
-  'BOB',
-  'UYU',
-  'VES',
-  'DOP',
-  'CRC',
-  'GTQ',
-  'PAB',
-] as const
 </file>
 
 <file path="src/data/repositories/productRepository.ts">
@@ -2476,90 +4564,6 @@ export function CatalogPage() {
           ))}
         </div>
       )}
-    </div>
-  )
-}
-</file>
-
-<file path="src/features/customer/product-viewer/components/ImageGallery.tsx">
-import { useState } from 'react'
-import { IconChevronLeft, IconChevronRight, IconImage } from '@/shared/ui/icons'
-import { cn } from '@/shared/utils/cn'
-
-interface ImageGalleryProps {
-  images: string[]
-  name: string
-}
-
-export function ImageGallery({ images, name }: ImageGalleryProps) {
-  const [index, setIndex] = useState(0)
-
-  if (images.length === 0) {
-    return (
-      <div className="flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-muted">
-        <IconImage width={32} height={32} />
-        <span className="text-xs">Este producto no tiene fotos</span>
-      </div>
-    )
-  }
-
-  const safeIndex = Math.min(index, images.length - 1)
-  const move = (delta: number) =>
-    setIndex((safeIndex + delta + images.length) % images.length)
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="relative aspect-square w-full overflow-hidden rounded-lg border border-line bg-bg">
-        <img
-          src={images[safeIndex]}
-          alt={`${name}, foto ${safeIndex + 1} de ${images.length}`}
-          className="h-full w-full object-contain"
-        />
-        {images.length > 1 ? (
-          <>
-            <button
-              type="button"
-              aria-label="Foto anterior"
-              onClick={() => move(-1)}
-              className="absolute left-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-line bg-bg/80 hover:bg-accent hover:text-accent-fg"
-            >
-              <IconChevronLeft />
-            </button>
-            <button
-              type="button"
-              aria-label="Foto siguiente"
-              onClick={() => move(1)}
-              className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-line bg-bg/80 hover:bg-accent hover:text-accent-fg"
-            >
-              <IconChevronRight />
-            </button>
-            <span className="absolute bottom-2 right-2 rounded-full border border-line bg-bg/80 px-2 py-0.5 text-xs">
-              {safeIndex + 1} / {images.length}
-            </span>
-          </>
-        ) : null}
-      </div>
-
-      {images.length > 1 ? (
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {images.map((image, position) => (
-            <button
-              key={`${position}-${image.slice(-24)}`}
-              type="button"
-              onClick={() => setIndex(position)}
-              aria-label={`Ver foto ${position + 1}`}
-              className={cn(
-                'h-14 w-14 shrink-0 overflow-hidden rounded-md border transition-opacity',
-                position === safeIndex
-                  ? 'border-fg ring-1 ring-fg'
-                  : 'border-line opacity-60 hover:opacity-100',
-              )}
-            >
-              <img src={image} alt="" className="h-full w-full object-cover" />
-            </button>
-          ))}
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -3617,88 +5621,6 @@ export function SettingsPage() {
 }
 </file>
 
-<file path="src/features/merchant/statistics/pages/StatisticsPage.tsx">
-import { Link, useParams } from 'react-router-dom'
-import { Badge } from '@/shared/ui/Badge'
-import { buttonClasses } from '@/shared/ui/Button'
-import { Card } from '@/shared/ui/Card'
-import { EmptyState } from '@/shared/ui/EmptyState'
-import { IconChart } from '@/shared/ui/icons'
-
-const plannedFeatures = [
-  'Ventas por período',
-  'Productos más vendidos',
-  'Productos más visitados',
-  'Horarios de mayor tráfico',
-  'Exportación a XLSX',
-  'Imagen de gráficas',
-]
-
-export function StatisticsPage() {
-  const { storeId } = useParams<{ storeId: string }>()
-
-  return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-xl font-semibold">Estadísticas</h1>
-        <p className="text-sm text-muted">
-          Métricas y reportes visuales del rendimiento de esta tienda.
-        </p>
-      </div>
-
-      <EmptyState
-        icon={<IconChart width={32} height={32} />}
-        title="Módulo en desarrollo"
-        description="La sección de estadísticas comerciales generará gráficas a partir de los datos que acumule esta tienda: ventas, visitas y productos destacados. Estará disponible en la siguiente fase del proyecto."
-        action={
-          <Link to=".." className={buttonClasses('outline', 'md')}>
-            Volver al resumen
-          </Link>
-        }
-      />
-
-      <Card className="p-5">
-        <h2 className="mb-3 text-sm font-semibold">Funcionalidades reservadas</h2>
-        <div className="flex flex-wrap gap-2">
-          {plannedFeatures.map((feature) => (
-            <Badge key={feature} variant="muted">
-              {feature}
-            </Badge>
-          ))}
-        </div>
-      </Card>
-
-      <p className="text-center text-xs text-muted">
-        ID de tienda para integración futura: {storeId}
-      </p>
-    </div>
-  )
-}
-</file>
-
-<file path="src/features/merchant/stores/components/MerchantHeader.tsx">
-import { Link } from 'react-router-dom'
-import { APP_NAME } from '@/config/constants'
-import { IconStore } from '@/shared/ui/icons'
-import { ThemeToggle } from '@/shared/ui/ThemeToggle'
-
-export function MerchantHeader() {
-  return (
-    <header className="border-b border-line">
-      <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between px-4">
-        <Link to="/" className="flex items-center gap-2 font-semibold">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md border border-line">
-            <IconStore />
-          </span>
-          {APP_NAME}
-        </Link>
-        <ThemeToggle />
-      </div>
-    </header>
-  )
-}
-</file>
-
 <file path="src/features/merchant/stores/components/StoreCard.tsx">
 import { Link } from 'react-router-dom'
 import { Card } from '@/shared/ui/Card'
@@ -4070,68 +5992,6 @@ function StatTile({ label, value }: { label: string; value: ReactNode }) {
 }
 </file>
 
-<file path="src/shared/hooks/useBodyScrollLock.ts">
-import { useEffect } from 'react'
-
-export function useBodyScrollLock(active: boolean): void {
-  useEffect(() => {
-    if (!active) return
-    const originalOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = originalOverflow
-    }
-  }, [active])
-}
-</file>
-
-<file path="src/shared/hooks/useDevice.ts">
-import { useMediaQuery } from './useMediaQuery'
-
-export function useIsMobile(): boolean {
-  return useMediaQuery('(max-width: 767px)')
-}
-
-export function useIsDesktop(): boolean {
-  return useMediaQuery('(min-width: 1024px)')
-}
-
-export function useDeviceType() {
-  const isMobile = useMediaQuery('(max-width: 767px)')
-  const isTablet = useMediaQuery('(min-width: 768px) and (max-width: 1023px)')
-  if (isMobile) return 'mobile' as const
-  if (isTablet) return 'tablet' as const
-  return 'desktop' as const
-}
-
-export function useIsTouch(): boolean {
-  const coarsePointer = useMediaQuery('(pointer: coarse)')
-  if (typeof window === 'undefined') return false
-  return coarsePointer || (navigator.maxTouchPoints ?? 0) > 0
-}
-</file>
-
-<file path="src/shared/hooks/useMediaQuery.ts">
-import { useEffect, useState } from 'react'
-
-export function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() =>
-    typeof window !== 'undefined' ? window.matchMedia(query).matches : false,
-  )
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const mql = window.matchMedia(query)
-    const handler = (event: MediaQueryListEvent) => setMatches(event.matches)
-    setMatches(mql.matches)
-    mql.addEventListener('change', handler)
-    return () => mql.removeEventListener('change', handler)
-  }, [query])
-
-  return matches
-}
-</file>
-
 <file path="src/shared/hooks/useScopedData.ts">
 import { useMemo } from 'react'
 import { useProductsStore } from '@/store/productsStore'
@@ -4200,40 +6060,6 @@ export function useProductsStatus(storeId: string | undefined): {
 }
 </file>
 
-<file path="src/shared/types/domain.ts">
-export interface Store {
-  id: string
-  name: string
-  description: string
-  currency: string
-  logo: string | null
-  createdAt: number
-  updatedAt: number
-}
-
-export type NewStore = Omit<Store, 'id' | 'createdAt' | 'updatedAt'>
-
-export interface Product {
-  id: string
-  storeId: string
-  name: string
-  description: string
-  price: number
-  stock: number
-  images: string[]
-  published: boolean
-  createdAt: number
-  updatedAt: number
-}
-
-export type NewProduct = Omit<Product, 'id' | 'createdAt' | 'updatedAt'>
-
-export interface CartItem {
-  productId: string
-  quantity: number
-}
-</file>
-
 <file path="src/shared/ui/Badge.tsx">
 import type { HTMLAttributes } from 'react'
 import { cn } from '@/shared/utils/cn'
@@ -4269,152 +6095,6 @@ export function Badge({ className, variant = 'outline', ...props }: BadgeProps) 
       )}
       {...props}
     />
-  )
-}
-</file>
-
-<file path="src/shared/ui/Button.tsx">
-import { forwardRef, type ButtonHTMLAttributes } from 'react'
-import { cn } from '@/shared/utils/cn'
-
-export type ButtonVariant = 'primary' | 'outline' | 'ghost'
-export type ButtonSize = 'sm' | 'md' | 'lg'
-
-const base =
-  'inline-flex items-center justify-center gap-2 rounded-md border font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fg/40 disabled:pointer-events-none disabled:opacity-40 select-none'
-
-const variants: Record<ButtonVariant, string> = {
-  primary: 'border-line bg-accent text-accent-fg hover:opacity-80',
-  outline: 'border-line bg-transparent text-fg hover:bg-accent hover:text-accent-fg',
-  ghost: 'border-transparent text-fg hover:bg-fg/10',
-}
-
-const sizes: Record<ButtonSize, string> = {
-  sm: 'h-8 px-3 text-xs',
-  md: 'h-10 px-4 text-sm',
-  lg: 'h-11 px-6 text-sm',
-}
-
-export function buttonClasses(
-  variant: ButtonVariant = 'primary',
-  size: ButtonSize = 'md',
-  className?: string,
-): string {
-  return cn(base, variants[variant], sizes[size], className)
-}
-
-export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: ButtonVariant
-  size?: ButtonSize
-}
-
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { className, variant = 'primary', size = 'md', type = 'button', ...props },
-  ref,
-) {
-  return <button ref={ref} type={type} className={buttonClasses(variant, size, className)} {...props} />
-})
-</file>
-
-<file path="src/shared/ui/Card.tsx">
-import type { HTMLAttributes } from 'react'
-import { cn } from '@/shared/utils/cn'
-
-export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn('rounded-lg border border-line bg-surface', className)}
-      {...props}
-    />
-  )
-}
-</file>
-
-<file path="src/shared/ui/ConfirmDialog.tsx">
-import { Button } from './Button'
-import { Modal } from './Modal'
-
-interface ConfirmDialogProps {
-  open: boolean
-  onClose: () => void
-  onConfirm: () => void
-  title: string
-  message: string
-  confirmLabel?: string
-  cancelLabel?: string
-}
-
-export function ConfirmDialog({
-  open,
-  onClose,
-  onConfirm,
-  title,
-  message,
-  confirmLabel = 'Confirmar',
-  cancelLabel = 'Cancelar',
-}: ConfirmDialogProps) {
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title={title}
-      footer={
-        <>
-          <Button variant="outline" size="sm" onClick={onClose}>
-            {cancelLabel}
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => {
-              onConfirm()
-              onClose()
-            }}
-          >
-            {confirmLabel}
-          </Button>
-        </>
-      }
-    >
-      <p className="text-sm text-muted">{message}</p>
-    </Modal>
-  )
-}
-</file>
-
-<file path="src/shared/ui/EmptyState.tsx">
-import type { ReactNode } from 'react'
-import { cn } from '@/shared/utils/cn'
-
-interface EmptyStateProps {
-  title: string
-  description?: string
-  action?: ReactNode
-  icon?: ReactNode
-  className?: string
-}
-
-export function EmptyState({
-  title,
-  description,
-  action,
-  icon,
-  className,
-}: EmptyStateProps) {
-  return (
-    <div
-      className={cn(
-        'flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-line px-6 py-14 text-center',
-        className,
-      )}
-    >
-      {icon ? <div className="text-muted">{icon}</div> : null}
-      <h3 className="text-base font-semibold">{title}</h3>
-      {description ? (
-        <p className="max-w-sm text-sm text-muted">{description}</p>
-      ) : null}
-      {action ? <div className="mt-2">{action}</div> : null}
-    </div>
   )
 }
 </file>
@@ -4674,96 +6354,113 @@ export function IconCircleX(props: SVGProps<SVGSVGElement>) {
 }
 </file>
 
-<file path="src/shared/ui/Label.tsx">
-import type { LabelHTMLAttributes } from 'react'
+<file path="src/shared/ui/Input.tsx">
+import { forwardRef, type InputHTMLAttributes } from 'react'
 import { cn } from '@/shared/utils/cn'
 
-export function Label({ className, ...props }: LabelHTMLAttributes<HTMLLabelElement>) {
-  return (
-    <label className={cn('mb-1.5 block text-sm font-medium', className)} {...props} />
-  )
-}
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+  function Input({ className, ...props }, ref) {
+    return (
+      <input
+        ref={ref}
+        className={cn(
+          'h-10 w-full rounded-md border border-line bg-bg px-3 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-fg/30 disabled:opacity-50',
+          className,
+        )}
+        {...props}
+      />
+    )
+  },
+)
 </file>
 
-<file path="src/shared/ui/QuantityStepper.tsx">
-import { IconMinus, IconPlus } from './icons'
+<file path="src/shared/ui/Modal.tsx">
+import { useEffect, type ReactNode } from 'react'
+import { IconX } from './icons'
 
-interface QuantityStepperProps {
-  value: number
-  onChange: (value: number) => void
-  min?: number
-  max?: number
+interface ModalProps {
+  open: boolean
+  onClose: () => void
+  title?: string
+  children: ReactNode
+  footer?: ReactNode
 }
 
-export function QuantityStepper({
-  value,
-  onChange,
-  min = 1,
-  max = Number.MAX_SAFE_INTEGER,
-}: QuantityStepperProps) {
-  const clamp = (next: number) => Math.min(max, Math.max(min, next))
+export function Modal({ open, onClose, title, children, footer }: ModalProps) {
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open, onClose])
+
+  if (!open) return null
 
   return (
-    <div className="inline-flex h-10 items-center rounded-md border border-line">
-      <button
-        type="button"
-        aria-label="Restar"
-        disabled={value <= min}
-        onClick={() => onChange(clamp(value - 1))}
-        className="flex h-full w-9 items-center justify-center disabled:opacity-30 hover:bg-fg/10"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-fg/50" onClick={onClose} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="animate-fade-up relative w-full max-w-md overscroll-y-contain rounded-lg border border-line bg-surface p-5 shadow-lg"
       >
-        <IconMinus />
-      </button>
-      <input
-        type="number"
-        aria-label="Cantidad"
-        value={value}
-        min={min}
-        max={max}
-        onChange={(event) => {
-          const parsed = Number(event.target.value)
-          if (Number.isFinite(parsed)) onChange(clamp(parsed))
-        }}
-        className="h-full w-12 border-x border-line bg-transparent text-center text-sm focus:outline-none"
-      />
-      <button
-        type="button"
-        aria-label="Sumar"
-        disabled={value >= max}
-        onClick={() => onChange(clamp(value + 1))}
-        className="flex h-full w-9 items-center justify-center disabled:opacity-30 hover:bg-fg/10"
-      >
-        <IconPlus />
-      </button>
+        <div className="mb-3 flex items-start justify-between gap-4">
+          {title ? <h2 className="text-base font-semibold">{title}</h2> : <span />}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="rounded-md p-1 hover:bg-fg/10"
+          >
+            <IconX />
+          </button>
+        </div>
+        {children}
+        {footer ? <div className="mt-5 flex justify-end gap-2">{footer}</div> : null}
+      </div>
     </div>
   )
 }
 </file>
 
-<file path="src/shared/ui/ThemeToggle.tsx">
-import { useUIStore } from '@/store/uiStore'
+<file path="src/shared/ui/Select.tsx">
+import type { SelectHTMLAttributes } from 'react'
 import { cn } from '@/shared/utils/cn'
-import { IconMoon, IconSun } from './icons'
 
-export function ThemeToggle({ className }: { className?: string }) {
-  const theme = useUIStore((state) => state.theme)
-  const toggleTheme = useUIStore((state) => state.toggleTheme)
-
+export function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <button
-      type="button"
-      onClick={toggleTheme}
-      aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
-      title={theme === 'dark' ? 'Modo claro' : 'Modo oscuro'}
+    <select
       className={cn(
-        'inline-flex h-9 w-9 items-center justify-center rounded-md border border-line transition-colors hover:bg-accent hover:text-accent-fg',
+        'h-10 w-full appearance-none rounded-md border border-line bg-bg px-3 text-base focus:outline-none focus:ring-2 focus:ring-fg/30 disabled:opacity-50',
         className,
       )}
-    >
-      {theme === 'dark' ? <IconMoon width={17} height={17} /> : <IconSun width={17} height={17} />}
-    </button>
+      {...props}
+    />
   )
 }
+</file>
+
+<file path="src/shared/ui/Textarea.tsx">
+import { forwardRef, type TextareaHTMLAttributes } from 'react'
+import { cn } from '@/shared/utils/cn'
+
+export const Textarea = forwardRef<
+  HTMLTextAreaElement,
+  TextareaHTMLAttributes<HTMLTextAreaElement>
+>(function Textarea({ className, ...props }, ref) {
+  return (
+    <textarea
+      ref={ref}
+      className={cn(
+        'min-h-24 w-full rounded-md border border-line bg-bg px-3 py-2 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-fg/30 disabled:opacity-50',
+        className,
+      )}
+      {...props}
+    />
+  )
+})
 </file>
 
 <file path="src/shared/ui/Toaster.tsx">
@@ -4829,161 +6526,6 @@ function ToastItem({ toast, onDone }: { toast: Toast; onDone: (id: number) => vo
         <IconX />
       </button>
     </div>
-  )
-}
-</file>
-
-<file path="src/shared/utils/cn.ts">
-export function cn(...parts: Array<string | false | null | undefined>): string {
-  return parts.filter(Boolean).join(' ')
-}
-</file>
-
-<file path="src/shared/utils/device.ts">
-export type DeviceType = 'mobile' | 'tablet' | 'desktop'
-
-export const BREAKPOINTS = {
-  mobileMax: 767,
-  tabletMax: 1023,
-} as const
-
-function matches(query: string): boolean {
-  return typeof window !== 'undefined' && window.matchMedia(query).matches
-}
-
-export function isMobileViewport(): boolean {
-  return matches(`(max-width: ${BREAKPOINTS.mobileMax}px)`)
-}
-
-export function isTabletViewport(): boolean {
-  return matches(
-    `(min-width: ${BREAKPOINTS.mobileMax + 1}px) and (max-width: ${BREAKPOINTS.tabletMax}px)`,
-  )
-}
-
-export function isDesktopViewport(): boolean {
-  return matches(`(min-width: ${BREAKPOINTS.tabletMax + 1}px)`)
-}
-
-export function getDeviceType(): DeviceType {
-  if (isMobileViewport()) return 'mobile'
-  if (isTabletViewport()) return 'tablet'
-  return 'desktop'
-}
-
-export function isTouchDevice(): boolean {
-  if (typeof window === 'undefined') return false
-  const maxTouchPoints = navigator.maxTouchPoints ?? 0
-  return matches('(pointer: coarse)') || maxTouchPoints > 0
-}
-</file>
-
-<file path="src/shared/utils/format.ts">
-export function formatPrice(value: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat('es', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 2,
-    }).format(value)
-  } catch {
-    return `${currency} ${value.toFixed(2)}`
-  }
-}
-
-export function formatDate(timestamp: number): string {
-  return new Intl.DateTimeFormat('es', { dateStyle: 'medium' }).format(
-    new Date(timestamp),
-  )
-}
-
-export function parsePrice(raw: string): number | null {
-  const normalized = raw.replace(',', '.').trim()
-  if (normalized === '') return null
-  const value = Number(normalized)
-  if (!Number.isFinite(value) || value < 0) return null
-  return Math.round(value * 100) / 100
-}
-
-export function parseStock(raw: string): number | null {
-  const value = Number(raw.trim())
-  if (!Number.isInteger(value) || value < 0) return null
-  return value
-}
-</file>
-
-<file path="src/store/cartStore.ts">
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-import { storageKey } from '@/data/storage/localStorageAdapter'
-import type { CartItem } from '@/shared/types/domain'
-
-interface CartState {
-  itemsByStore: Record<string, CartItem[]>
-  addItem: (storeId: string, productId: string, quantity?: number) => void
-  setQuantity: (storeId: string, productId: string, quantity: number) => void
-  removeItem: (storeId: string, productId: string) => void
-  clearStore: (storeId: string) => void
-}
-
-const EMPTY_ITEMS: CartItem[] = []
-
-export const useCartStore = create<CartState>()(
-  persist(
-    (set) => ({
-      itemsByStore: {},
-
-      addItem: (storeId, productId, quantity = 1) =>
-        set((state) => {
-          const items = state.itemsByStore[storeId] ?? []
-          const existing = items.find((item) => item.productId === productId)
-          const next = existing
-            ? items.map((item) =>
-                item.productId === productId
-                  ? { ...item, quantity: item.quantity + quantity }
-                  : item,
-              )
-            : [...items, { productId, quantity }]
-          return { itemsByStore: { ...state.itemsByStore, [storeId]: next } }
-        }),
-
-      setQuantity: (storeId, productId, quantity) =>
-        set((state) => {
-          const items = state.itemsByStore[storeId] ?? []
-          const next =
-            quantity <= 0
-              ? items.filter((item) => item.productId !== productId)
-              : items.map((item) =>
-                  item.productId === productId ? { ...item, quantity } : item,
-                )
-          return { itemsByStore: { ...state.itemsByStore, [storeId]: next } }
-        }),
-
-      removeItem: (storeId, productId) =>
-        set((state) => {
-          const items = state.itemsByStore[storeId] ?? []
-          return {
-            itemsByStore: {
-              ...state.itemsByStore,
-              [storeId]: items.filter((item) => item.productId !== productId),
-            },
-          }
-        }),
-
-      clearStore: (storeId) =>
-        set((state) => {
-          const next = { ...state.itemsByStore }
-          delete next[storeId]
-          return { itemsByStore: next }
-        }),
-    }),
-    { name: storageKey('cart') },
-  ),
-)
-
-export function useCartItems(storeId: string | undefined): CartItem[] {
-  return useCartStore((state) =>
-    storeId ? (state.itemsByStore[storeId] ?? EMPTY_ITEMS) : EMPTY_ITEMS,
   )
 }
 </file>
@@ -5189,21 +6731,6 @@ export const useUIStore = create<UIState>()(
 )
 </file>
 
-<file path="src/theme/ThemeProvider.tsx">
-import { useEffect, type ReactNode } from 'react'
-import { useUIStore } from '@/store/uiStore'
-
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const theme = useUIStore((state) => state.theme)
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark')
-  }, [theme])
-
-  return <>{children}</>
-}
-</file>
-
 <file path="src/main.tsx">
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -5230,51 +6757,38 @@ interface ImportMeta {
 }
 </file>
 
-<file path=".gitignore">
-node_modules
-dist
-*.local
-.DS_Store
-</file>
-
-<file path="package.json">
-{
-  "name": "creatienda",
-  "private": true,
-  "version": "0.1.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^6.30.1",
-    "zustand": "^5.0.8"
-  },
-  "devDependencies": {
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.5.0",
-    "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.49",
-    "tailwindcss": "^3.4.17",
-    "typescript": "~5.7.2",
-    "vite": "^6.3.5"
-  }
-}
-</file>
-
-<file path="postcss.config.js">
-export default {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
-  },
-}
+<file path="index.html">
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="CreaTienda — Crea y gestiona tus tiendas online" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>CreaTienda — Crea tu tienda online</title>
+    <script>
+      try {
+        var raw = localStorage.getItem('creatienda:ui')
+        var theme = raw ? (JSON.parse(raw).state || {}).theme : null
+        if (
+          theme === 'dark' ||
+          (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        ) {
+          document.documentElement.classList.add('dark')
+        }
+      } catch (error) {
+        void error
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
 </file>
 
 <file path="tailwind.config.js">
@@ -5320,56 +6834,6 @@ export default {
     },
   },
   plugins: [],
-}
-</file>
-
-<file path="tsconfig.json">
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "useDefineForClassFields": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx",
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "skipLibCheck": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    }
-  },
-  "include": ["src", "vite.config.ts"]
-}
-</file>
-
-<file path="src/app/pages/NotFoundPage.tsx">
-import { Link } from 'react-router-dom'
-import { buttonClasses } from '@/shared/ui/Button'
-import { EmptyState } from '@/shared/ui/EmptyState'
-import { IconAlert } from '@/shared/ui/icons'
-
-export function NotFoundPage() {
-  return (
-    <div className="flex min-h-[100dvh] items-center justify-center p-6">
-      <EmptyState
-        icon={<IconAlert width={28} height={28} />}
-        title="Página no encontrada"
-        description="La ruta que buscas no existe o la tienda fue eliminada."
-        action={
-          <Link to="/" className={buttonClasses('primary', 'md')}>
-            Ir a mis tiendas
-          </Link>
-        }
-      />
-    </div>
-  )
 }
 </file>
 
@@ -5957,115 +7421,6 @@ export function StoresListPage() {
 }
 </file>
 
-<file path="src/shared/ui/Input.tsx">
-import { forwardRef, type InputHTMLAttributes } from 'react'
-import { cn } from '@/shared/utils/cn'
-
-export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
-  function Input({ className, ...props }, ref) {
-    return (
-      <input
-        ref={ref}
-        className={cn(
-          'h-10 w-full rounded-md border border-line bg-bg px-3 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-fg/30 disabled:opacity-50',
-          className,
-        )}
-        {...props}
-      />
-    )
-  },
-)
-</file>
-
-<file path="src/shared/ui/Modal.tsx">
-import { useEffect, type ReactNode } from 'react'
-import { IconX } from './icons'
-
-interface ModalProps {
-  open: boolean
-  onClose: () => void
-  title?: string
-  children: ReactNode
-  footer?: ReactNode
-}
-
-export function Modal({ open, onClose, title, children, footer }: ModalProps) {
-  useEffect(() => {
-    if (!open) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open, onClose])
-
-  if (!open) return null
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-fg/50" onClick={onClose} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="animate-fade-up relative w-full max-w-md overscroll-y-contain rounded-lg border border-line bg-surface p-5 shadow-lg"
-      >
-        <div className="mb-3 flex items-start justify-between gap-4">
-          {title ? <h2 className="text-base font-semibold">{title}</h2> : <span />}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Cerrar"
-            className="rounded-md p-1 hover:bg-fg/10"
-          >
-            <IconX />
-          </button>
-        </div>
-        {children}
-        {footer ? <div className="mt-5 flex justify-end gap-2">{footer}</div> : null}
-      </div>
-    </div>
-  )
-}
-</file>
-
-<file path="src/shared/ui/Select.tsx">
-import type { SelectHTMLAttributes } from 'react'
-import { cn } from '@/shared/utils/cn'
-
-export function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      className={cn(
-        'h-10 w-full appearance-none rounded-md border border-line bg-bg px-3 text-base focus:outline-none focus:ring-2 focus:ring-fg/30 disabled:opacity-50',
-        className,
-      )}
-      {...props}
-    />
-  )
-}
-</file>
-
-<file path="src/shared/ui/Textarea.tsx">
-import { forwardRef, type TextareaHTMLAttributes } from 'react'
-import { cn } from '@/shared/utils/cn'
-
-export const Textarea = forwardRef<
-  HTMLTextAreaElement,
-  TextareaHTMLAttributes<HTMLTextAreaElement>
->(function Textarea({ className, ...props }, ref) {
-  return (
-    <textarea
-      ref={ref}
-      className={cn(
-        'min-h-24 w-full rounded-md border border-line bg-bg px-3 py-2 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-fg/30 disabled:opacity-50',
-        className,
-      )}
-      {...props}
-    />
-  )
-})
-</file>
-
 <file path="src/index.css">
 @tailwind base;
 @tailwind components;
@@ -6148,40 +7503,6 @@ export const Textarea = forwardRef<
     padding-right: env(safe-area-inset-right);
   }
 }
-</file>
-
-<file path="index.html">
-<!doctype html>
-<html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="description" content="CreaTienda — Crea y gestiona tus tiendas online" />
-    <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>CreaTienda — Crea tu tienda online</title>
-    <script>
-      try {
-        var raw = localStorage.getItem('creatienda:ui')
-        var theme = raw ? (JSON.parse(raw).state || {}).theme : null
-        if (
-          theme === 'dark' ||
-          (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-        ) {
-          document.documentElement.classList.add('dark')
-        }
-      } catch (error) {
-        void error
-      }
-    </script>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
 </file>
 
 <file path="vite.config.ts">

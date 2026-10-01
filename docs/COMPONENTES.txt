@@ -26,10 +26,12 @@ PÁGINAS:
 StorefrontLayout   — src/features/customer/storefront/pages/StorefrontLayout.tsx
                      Marco de toda la tienda pública: header fijo arriba + main + footer.
                      Si la tienda no existe: pantalla "Tienda no disponible".
+                     Aplica el tema personalizado de la tienda como variables CSS inline en su
+                     raíz (themeVarsStyle); con tema propio se oculta el ThemeToggle.
 StorefrontHeader   — (dentro de StorefrontLayout)
                      Barra superior fija: cajón logo (o ícono de tienda) + nombre de la tienda (clic = inicio),
                      link "Catálogo" (subrayado si activo), botón "Carrito" con contador de ítems (chip
-                     redondo invertido), y ThemeToggle.
+                     redondo invertido), y ThemeToggle (solo si la tienda no tiene tema propio).
 StorefrontFooter   — (dentro de StorefrontLayout)
                      Pie discreto centrado: "Tienda creada con CreaTienda".
 
@@ -91,12 +93,13 @@ StoreDashboardLayout — src/features/merchant/stores/layouts/StoreDashboardLayo
                      Marco del panel de una tienda (/stores/:storeId/*).
 Sidebar            — (dentro de StoreDashboardLayout)
                      Columna izquierda (arriba en móvil): link "Tiendas" con flecha + ThemeToggle,
-                     nombre de la tienda + rótulo "Panel del comerciante", menú vertical con 5 ítems
+                     nombre de la tienda + rótulo "Panel del comerciante", menú vertical con 6 ítems
                      (ítem activo = relleno invertido):
                        Resumen (IconDashboard)   → /stores/:storeId
                        Productos (IconPackage)   → /stores/:storeId/products
                        Inventario (IconBoxes)    → /stores/:storeId/inventory
                        Estadísticas (IconChart)  → /stores/:storeId/statistics
+                       Apariencia (IconPalette)  → /stores/:storeId/appearance
                        Ajustes (IconSettings)    → /stores/:storeId/settings
                      Abajo: botón "Ver tienda pública" (abre /shop/:storeId en pestaña nueva).
 
@@ -153,6 +156,24 @@ SettingsPage       — src/features/merchant/admin/pages/SettingsPage.tsx
                        "¿Eliminar tienda definitivamente?", "Sí, eliminar"; borra en cascada
                        productos y carrito y vuelve a "Mis tiendas").
 
+AppearancePage     — src/features/merchant/admin/pages/AppearancePage.tsx
+                     Personalización de colores de la tienda pública (/stores/:storeId/appearance).
+                     Columna izquierda: tarjeta "Modo de personalización" (Simple = 4 ColorField
+                     con derivados; Avanzado = los 7 tokens), grid "Paletas de la plataforma"
+                     (card "Predeterminado del sistema" + PRESET_PALETTES) y "Mis paletas
+                     guardadas" (PaletteCard con botón papelera + "Guardar personalización" → Modal
+                     con nombre). Columna derecha sticky: ThemePreview + "Guardar colores"
+                     (updateStore theme) y "Restaurar colores del sistema" (ConfirmDialog).
+ColorField         — src/features/merchant/admin/components/ColorField.tsx
+                     Fila de edición de un token: selector nativo (input type=color) + Input hex
+                     con validación en línea (texto de error text-danger si no es #rrggbb).
+PaletteCard        — src/features/merchant/admin/components/PaletteCard.tsx
+                     Tarjeta seleccionable de paleta: mini-preview pintada con las variables del
+                     tema + nombre; anillo (ring-fg) e IconCheck cuando está seleccionada.
+ThemePreview       — src/features/merchant/admin/components/ThemePreview.tsx
+                     Maqueta a escala del storefront (header, card de producto, pie) que se pinta
+                     con themeVarsStyle del tema en edición.
+
 StatisticsPage     — src/features/merchant/statistics/pages/StatisticsPage.tsx
                      STUB (no desarrollar aún): "Módulo en desarrollo" + lista de badges
                      "Funcionalidades reservadas" (ventas por período, más vendidos, más visitados,
@@ -189,20 +210,23 @@ ThemeToggle        — src/shared/ui/ThemeToggle.tsx  — Botón cuadrado sol/lu
 Toaster / Toast    — src/shared/ui/Toaster.tsx      — Avisos flotantes abajo-derecha con tono semántico
                       (showToast(msg, tone)): success = verde + check, error = rojo + círculo con X,
                       warning = ámbar + triángulo. Fondo sutil mezclado con surface y auto-cierre a los 3.2 s.
-Iconos             — src/shared/ui/icons.tsx        — 23 íconos SVG de línea: IconSun, IconMoon,
+Iconos             — src/shared/ui/icons.tsx        — 24 íconos SVG de línea: IconSun, IconMoon,
                      IconCart, IconPlus, IconMinus, IconTrash, IconPencil, IconExternal,
                      IconChevronLeft, IconChevronRight, IconImage, IconCheck, IconX, IconStore,
                      IconChart, IconPackage, IconSettings, IconArrowLeft, IconSearch, IconDashboard,
-                      IconBoxes, IconAlert, IconCircleX.
+                      IconBoxes, IconAlert, IconCircleX, IconPalette.
 
 --------------------------------------------------------------------------------
 4. STORES DE ESTADO (Zustand) — para nombrar lógica en prompts
 --------------------------------------------------------------------------------
 storesStore        — src/store/storesStore.ts       — Tiendas del comerciante desde la API: load()
                       (con loading/loaded/error), createStore/updateStore/deleteStore async
-                      (el servidor casca productos; localmente se limpian productos y carrito).
+                      (updateStore acepta patch parcial incl. `theme`; el servidor casca productos y
+                      paletas; localmente se limpian productos, carrito y paletas).
 productsStore      — src/store/productsStore.ts     — Productos por tienda (loadForStore con
                       loadedStores/loadingByStore); addProduct, updateProduct, removeProduct async.
+palettesStore      — src/store/palettesStore.ts     — Paletas guardadas por tienda (loadForStore con
+                      loadedStores/loadingByStore); savePalette, deletePalette, removeStorePalettes.
 cartStore          — src/store/cartStore.ts         — Carritos AISLADOS por tienda (itemsByStore);
                       addItem, setQuantity, removeItem, clearStore. Persiste en localStorage.
 uiStore            — src/store/uiStore.ts           — Tema (light/dark) y cola de toasts con tono
@@ -221,15 +245,24 @@ storeRepository    — src/data/repositories/storeRepository.ts — /stores (fin
                       update PATCH, remove DELETE).
 productRepository  — src/data/repositories/productRepository.ts — /stores/<sid>/products (per_page=200),
                       /products/<pid> (findById, update, remove).
+paletteRepository  — src/data/repositories/paletteRepository.ts — /stores/<sid>/palettes (findAllByStore,
+                      create, update PATCH, remove DELETE). Paletas de color guardadas por tienda.
 localStorageAdapter— src/data/storage/localStorageAdapter.ts — Solo storageKey("creatienda:…") para
                       carrito y tema (los datos de dominio viven en el backend).
-Tipos de dominio   — src/shared/types/domain.ts     — Store, NewStore, Product, NewProduct, CartItem
+Tipos de dominio   — src/shared/types/domain.ts     — Store (con `theme: StoreTheme | null`), NewStore,
+                      Product, NewProduct, CartItem, StoreTheme (7 tokens hex: bg, fg, surface, muted,
+                      line, accent, accentFg), ThemeToken, SavedPalette, NewSavedPalette
                       (espejo exacto de to_dict() del backend: ids UUID, fechas en ms).
 Utilidades         — src/shared/utils/              — cn (clases CSS), format (formatPrice, formatDate,
-                      parsePrice, parseStock).
+                      parsePrice, parseStock), color (isValidHex, hexToTriplet, mixHex, bestContrastFg,
+                      deriveTheme/themeToSimple, THEME_TOKEN_LABELS, SIMPLE_TOKENS, ALL_TOKENS),
+                      theme (themeVarsStyle: StoreTheme → variables CSS para el storefront).
 Constantes         — src/config/constants.ts        — APP_NAME "CreaTienda", DEFAULT_CURRENCY USD,
                       LOW_STOCK_THRESHOLD 5, lista CURRENCIES (USD, EUR, MXN, COP, ARS...),
                       sincronizada con app/config.py del backend.
+Paletas            — src/config/palettes.ts         — PRESET_PALETTES (10 paletas de la plataforma,
+                      cada una con sus 7 StoreTheme) y DEFAULT_STORE_THEME (copia de los tokens claros
+                      del sistema; punto de partida del editor). No cambian index.css.
 
 ================================================================================
  EJEMPLO DE USO EN PROMPTS:

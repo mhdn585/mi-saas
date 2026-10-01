@@ -8,6 +8,7 @@ import { ThemeToggle } from '@/shared/ui/ThemeToggle'
 import { IconCart, IconStore } from '@/shared/ui/icons'
 import { useStoreById, useStoresStatus } from '@/shared/hooks/useScopedData'
 import { useCartItems } from '@/store/cartStore'
+import { themeVarsStyle } from '@/shared/utils/theme'
 import { useProductsStore } from '@/store/productsStore'
 import { useUIStore } from '@/store/uiStore'
 import { cn } from '@/shared/utils/cn'
@@ -47,7 +48,10 @@ export function StorefrontLayout() {
   }
 
   return (
-    <div className="flex min-h-[100dvh] flex-col">
+    <div
+      className="flex min-h-[100dvh] flex-col bg-bg text-fg"
+      style={themeVarsStyle(store.theme)}
+    >
       <header className="sticky top-0 z-40 border-b border-line bg-bg/90 backdrop-blur">
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4">
           <Link to="." className="flex min-w-0 items-center gap-2 font-semibold">
@@ -90,7 +94,8 @@ export function StorefrontLayout() {
                 </span>
               ) : null}
             </NavLink>
-            <ThemeToggle />
+            {/* Con tema propio la tienda fija todos sus colores: el toggle no tendría efecto. */}
+            {store.theme ? null : <ThemeToggle />}
           </nav>
         </div>
       </header>

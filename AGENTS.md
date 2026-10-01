@@ -48,7 +48,18 @@ Backend (`cd backend`, Python 3.11+ y PostgreSQL 14+):
   los assets sin referencias pasan a `orphan` y se limpian con
   `flask --app run.py media cleanup --grace-days N`.
 - Rutas: TODA página debe registrarse en `src/app/routes.tsx`. Panel merchant bajo
-  `/stores/:storeId/...`, tienda pública bajo `/shop/:storeId`.
+  `/stores/:storeId/...` (código en `src/features/merchant/`), tienda pública bajo
+  `/shop/:storeId` (código en `src/features/customer/`).
+- Tema de tienda (personalización de colores): `stores.theme` es JSON con 7 colores hex
+  (`bg/fg/surface/muted/line/accent/accentFg`, NULL = default del sistema; `PATCH /stores/<id>`
+  con `theme:null` restaura). Se aplica SOLO en `StorefrontLayout` vía `themeVarsStyle()`
+  (tríadas "r g b" inline que sobreescriben las variables CSS del subtree: ninguna clase
+  `bg-bg`/`text-accent` cambia; `:root`/`.dark` quedan intactos). Con tema propio se oculta el
+  `ThemeToggle` del storefront. Las paletas precargadas viven en `src/config/palettes.ts`
+  (frontend, no en BD); las paletas guardadas por el usuario son dominio: tabla
+  `saved_palettes` (FK→stores CASCADE, nombre único por tienda) con CRUD en `/stores/<sid>/palettes`
+  → `paletteRepository`/`palettesStore`. El editor (`AppearancePage`) persiste SIEMPRE el tema
+  resuelto de 7 tokens (el modo simple solo deriva `muted/line/accentFg` con `deriveTheme()`).
 - Alias `@/` → `src/`, declarado en `vite.config.ts` Y `tsconfig.json`.
 - Tema claro/oscuro: tokens CSS en `src/index.css` (`--bg`, `--fg`, `--line`, `--surface`,
   `--muted`, `--accent`) con sus utilidades Tailwind (`bg-bg`, `text-fg`, `border-line`,

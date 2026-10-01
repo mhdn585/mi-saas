@@ -1,14 +1,40 @@
+export interface StoreTheme {
+  bg: string
+  fg: string
+  surface: string
+  muted: string
+  line: string
+  accent: string
+  accentFg: string
+}
+
+export type ThemeToken = keyof StoreTheme
+
 export interface Store {
   id: string
   name: string
   description: string
   currency: string
   logo: string | null
+  theme: StoreTheme | null
   createdAt: number
   updatedAt: number
 }
 
-export type NewStore = Omit<Store, 'id' | 'createdAt' | 'updatedAt'>
+export type NewStore = Omit<Store, 'id' | 'createdAt' | 'updatedAt' | 'theme'> & {
+  theme?: StoreTheme | null
+}
+
+export interface SavedPalette {
+  id: string
+  storeId: string
+  name: string
+  colors: StoreTheme
+  createdAt: number
+  updatedAt: number
+}
+
+export type NewSavedPalette = Omit<SavedPalette, 'id' | 'storeId' | 'createdAt' | 'updatedAt'>
 
 export interface Product {
   id: string

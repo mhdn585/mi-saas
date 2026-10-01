@@ -4,6 +4,7 @@ import { StoresListPage } from '@/features/merchant/stores/pages/StoresListPage'
 import { CreateStorePage } from '@/features/merchant/stores/pages/CreateStorePage'
 import { StoreOverviewPage } from '@/features/merchant/stores/pages/StoreOverviewPage'
 import { SettingsPage } from '@/features/merchant/admin/pages/SettingsPage'
+import { AppearancePage } from '@/features/merchant/admin/pages/AppearancePage'
 import { ProductsPage } from '@/features/merchant/admin/pages/ProductsPage'
 import { ProductFormPage } from '@/features/merchant/admin/pages/ProductFormPage'
 import { InventoryPage } from '@/features/merchant/admin/pages/InventoryPage'
@@ -27,6 +28,7 @@ export function AppRoutes() {
         <Route path="products/:productId" element={<ProductFormPage />} />
         <Route path="inventory" element={<InventoryPage />} />
         <Route path="statistics" element={<StatisticsPage />} />
+        <Route path="appearance" element={<AppearancePage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
 

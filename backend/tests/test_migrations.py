@@ -37,8 +37,9 @@ def test_upgrade_downgrade_cycle(scratch_url):
 
         command.downgrade(cfg, "-1")
         names = set(inspect(engine).get_table_names())
-        assert "product_images" not in names
+        assert "saved_palettes" not in names
         assert "stores" in names
+        assert "theme" not in {c["name"] for c in inspect(engine).get_columns("stores")}
 
         command.downgrade(cfg, "base")
         names = set(inspect(engine).get_table_names())

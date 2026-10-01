@@ -11,6 +11,7 @@ import {
   IconDashboard,
   IconExternal,
   IconPackage,
+  IconPalette,
   IconSettings,
 } from '@/shared/ui/icons'
 import { useStoreById, useStoresStatus } from '@/shared/hooks/useScopedData'
@@ -24,6 +25,7 @@ const navItems = [
   { to: 'products', label: 'Productos', Icon: IconPackage, end: false },
   { to: 'inventory', label: 'Inventario', Icon: IconBoxes, end: false },
   { to: 'statistics', label: 'Estadísticas', Icon: IconChart, end: false },
+  { to: 'appearance', label: 'Apariencia', Icon: IconPalette, end: false },
   { to: 'settings', label: 'Ajustes', Icon: IconSettings, end: false },
 ]
 

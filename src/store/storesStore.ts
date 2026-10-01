@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { storeRepository } from '@/data/repositories/storeRepository'
 import { useCartStore } from '@/store/cartStore'
+import { usePalettesStore } from '@/store/palettesStore'
 import { useProductsStore } from '@/store/productsStore'
 import type { NewStore, Store } from '@/shared/types/domain'
 
@@ -55,9 +56,10 @@ export const useStoresStore = create<StoresState>((set, get) => ({
 
   deleteStore: async (id) => {
     await storeRepository.remove(id)
-    // El servidor elimina los productos en cascada; solo queda limpiar el estado local.
+    // El servidor elimina productos y paletas en cascada; solo queda limpiar el estado local.
     useProductsStore.getState().removeStoreProducts(id)
     useCartStore.getState().clearStore(id)
+    usePalettesStore.getState().removeStorePalettes(id)
     set((state) => ({
       stores: state.stores.filter((store) => store.id !== id),
     }))

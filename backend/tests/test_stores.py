@@ -63,3 +63,60 @@ def test_delete_store_cascades_products(client, make_store):
 def test_create_store_blank_name(client):
     resp = client.post("/api/v1/stores", json={"name": "   "})
     assert resp.status_code == 422
+
+
+THEME = {
+    "bg": "#fff8f0",
+    "fg": "#3b2a1a",
+    "surface": "#ffffff",
+    "muted": "#8a7666",
+    "line": "#e5d8cc",
+    "accent": "#e8632a",
+    "accentFg": "#ffffff",
+}
+
+
+def test_store_theme_defaults_null(client, make_store):
+    store = make_store()
+    assert store["theme"] is None
+    body = client.get(f"/api/v1/stores/{store['id']}").get_json()
+    assert body["theme"] is None
+
+
+def test_update_store_theme(client, make_store):
+    store = make_store()
+    resp = client.patch(f"/api/v1/stores/{store['id']}", json={"theme": THEME})
+    assert resp.status_code == 200
+    assert resp.get_json()["theme"] == THEME
+    assert client.get(f"/api/v1/stores/{store['id']}").get_json()["theme"] == THEME
+
+
+def test_update_store_theme_reset(client, make_store):
+    store = make_store()
+    client.patch(f"/api/v1/stores/{store['id']}", json={"theme": THEME})
+    resp = client.patch(f"/api/v1/stores/{store['id']}", json={"theme": None})
+    assert resp.status_code == 200
+    assert resp.get_json()["theme"] is None
+
+
+def test_update_store_theme_invalid_hex(client, make_store):
+    store = make_store()
+    bad = dict(THEME, accent="rojo")
+    resp = client.patch(f"/api/v1/stores/{store['id']}", json={"theme": bad})
+    assert resp.status_code == 422
+    assert client.get(f"/api/v1/stores/{store['id']}").get_json()["theme"] is None
+
+
+def test_update_store_theme_incomplete(client, make_store):
+    store = make_store()
+    partial = {k: v for k, v in THEME.items() if k != "accentFg"}
+    resp = client.patch(f"/api/v1/stores/{store['id']}", json={"theme": partial})
+    assert resp.status_code == 422
+
+
+def test_create_store_with_theme(client):
+    resp = client.post(
+        "/api/v1/stores", json={"name": "Con tema", "theme": THEME}
+    )
+    assert resp.status_code == 201
+    assert resp.get_json()["theme"] == THEME

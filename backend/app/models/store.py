@@ -21,6 +21,10 @@ class Store(db.Model):
         db.ForeignKey("media_assets.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Tema de personalización de la tienda pública: JSON con 7 colores
+    # camelCase (bg, fg, surface, muted, line, accent, accentFg) en hex.
+    # NULL = colores por defecto del sistema.
+    theme = db.Column(db.JSON, nullable=True)
     created_at = db.Column(db.BigInteger, default=_now_ms, nullable=False)
     updated_at = db.Column(
         db.BigInteger, default=_now_ms, onupdate=_now_ms, nullable=False
@@ -55,6 +59,7 @@ class Store(db.Model):
             "description": self.description or "",
             "currency": self.currency,
             "logo": self.logo,
+            "theme": self.theme,
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
         }
