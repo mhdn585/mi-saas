@@ -1,4 +1,39 @@
-node_modules
-dist
+# Dependencias / builds
+node_modules/
+dist/
 *.local
 .DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Secretos y datos locales (NUNCA subir)
+.env
+.env.*
+!.env.example
+instance/
+media/
+*.db
+*.sqlite3
+
+# Backups y claves
+backups/
+*.dump
+*.pem
+*.key
+*.p12
+
+# Volcados de código
+repomix*
+*.log
+
+# Docs internos del proyecto (no subir)
+AGENTS.md
+DIAGRAMAS.md
+DIAGRAMS.md
