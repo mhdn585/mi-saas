@@ -1,33 +1,45 @@
 from app.errors import NotFoundError, ValidationError
 from app.models.media_asset import MediaAsset
 from app.models.product import Product
+from app.models.store import Store
 from app.repositories.store_repo import store_repository
 from app.services import media_service
 
 
-def list_stores():
-    return store_repository.find_all()
+def list_stores(owner_id: str) -> list[Store]:
+    return store_repository.find_by_owner(owner_id)
 
 
-def get_store(store_id: str):
+def get_store(store_id: str) -> Store:
+    """Lectura pública: la ficha de tienda se muestra también en el storefront."""
     store = store_repository.find_by_id(store_id)
     if store is None:
         raise NotFoundError("Tienda no encontrada")
     return store
 
 
-def create_store(data: dict):
+def get_owned_store(store_id: str, owner_id: str) -> Store:
+    """Solo del dueño; si no, 404 (no revela existencia)."""
+    store = store_repository.find_by_id(store_id)
+    if store is None or store.owner_id != owner_id:
+        raise NotFoundError("Tienda no encontrada")
+    return store
+
+
+def create_store(owner_id: str, data: dict) -> Store:
     data = dict(data)
+    data["owner_id"] = owner_id
     _apply_logo(data)
     return store_repository.create(data)
 
 
-def update_store(store_id: str, patch: dict):
+def update_store(store_id: str, patch: dict, owner_id: str) -> Store:
+    get_owned_store(store_id, owner_id)
     patch = dict(patch)
     had_logo = "logo" in patch
     old_logo_asset_id = None
     if had_logo:
-        store = get_store(store_id)
+        store = store_repository.find_by_id(store_id)
         old_logo_asset_id = store.logo_asset_id
         _apply_logo(patch)
     store = store_repository.update(store_id, patch)
@@ -39,10 +51,8 @@ def update_store(store_id: str, patch: dict):
     return store
 
 
-def delete_store(store_id: str):
-    store = store_repository.find_by_id(store_id)
-    if store is None:
-        raise NotFoundError("Tienda no encontrada")
+def delete_store(store_id: str, owner_id: str) -> None:
+    store = get_owned_store(store_id, owner_id)
 
     asset_ids: set[str] = set()
     if store.logo_asset_id:

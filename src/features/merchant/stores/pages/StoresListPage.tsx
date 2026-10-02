@@ -26,7 +26,7 @@ export function StoresListPage() {
               independiente: productos, inventario y estadísticas propios.
             </p>
           </div>
-          <Link to="/stores/new" className={buttonClasses('primary', 'md')}>
+          <Link to="/app/stores/new" className={buttonClasses('primary', 'md')}>
             <IconPlus />
             Crear tienda
           </Link>
@@ -52,7 +52,7 @@ export function StoresListPage() {
               title="Aún no tienes tiendas"
               description="Crea tu primera tienda online y empieza a publicar productos en minutos."
               action={
-                <Link to="/stores/new" className={buttonClasses('primary', 'md')}>
+                <Link to="/app/stores/new" className={buttonClasses('primary', 'md')}>
                   <IconPlus />
                   Crear mi primera tienda
                 </Link>

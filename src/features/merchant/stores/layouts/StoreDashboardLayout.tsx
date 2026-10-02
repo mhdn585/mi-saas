@@ -62,7 +62,7 @@ export function StoreDashboardLayout() {
                 Reintentar
               </Button>
             ) : (
-              <Link to="/" className={buttonClasses('primary', 'md')}>
+              <Link to="/app" className={buttonClasses('primary', 'md')}>
                 Ir a mis tiendas
               </Link>
             )
@@ -77,7 +77,7 @@ export function StoreDashboardLayout() {
       <aside className="flex shrink-0 flex-col border-b border-line md:sticky md:top-0 md:h-screen md:w-64 md:overflow-y-auto md:border-b-0 md:border-r">
         <div className="flex items-center justify-between gap-2 border-b border-line p-3">
           <Link
-            to="/"
+            to="/app"
             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-muted hover:bg-fg/10 hover:text-fg"
           >
             <IconArrowLeft />

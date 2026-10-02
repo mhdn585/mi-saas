@@ -21,6 +21,11 @@ class NotFoundError(ApiError):
     code = "not_found"
 
 
+class UnauthorizedError(ApiError):
+    status_code = 401
+    code = "no_autenticado"
+
+
 class ValidationError(ApiError):
     status_code = 422
     code = "validation_error"

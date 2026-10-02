@@ -2,11 +2,13 @@ from flask import Blueprint, request
 
 from app.errors import ValidationError
 from app.services import media_service
+from app.utils.auth import login_required
 
 bp = Blueprint("media", __name__)
 
 
 @bp.post("/media")
+@login_required
 def upload_media():
     if "file" not in request.files:
         raise ValidationError("Falta el campo 'file' en la petición.")

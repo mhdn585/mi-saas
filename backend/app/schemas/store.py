@@ -30,6 +30,22 @@ class StoreThemeSchema(TrimmingSchema):
     accentFg = _hex_field()
 
 
+class StoreLogoConfigSchema(TrimmingSchema):
+    """Configuración de renderizado del logo en el header de la tienda pública."""
+
+    fit = fields.String(
+        load_default="contain", validate=validate.OneOf(("contain", "cover"))
+    )
+    height = fields.Integer(load_default=40, validate=validate.Range(min=24, max=56))
+    positionX = fields.Float(load_default=50, validate=validate.Range(min=0, max=100))
+    positionY = fields.Float(load_default=50, validate=validate.Range(min=0, max=100))
+    background = fields.String(
+        allow_none=True,
+        load_default=None,
+        validate=validate.Regexp(HEX_COLOR_RE, error="Debe ser un color hex #rrggbb"),
+    )
+
+
 class StoreCreateSchema(TrimmingSchema):
     trim_fields = ("name", "description")
 
@@ -39,6 +55,9 @@ class StoreCreateSchema(TrimmingSchema):
     description = fields.String(load_default="", validate=validate.Length(max=280))
     currency = fields.String(load_default="USD", validate=validate.OneOf(CURRENCIES))
     logo = fields.String(allow_none=True, load_default=None)
+    logo_config = fields.Nested(
+        StoreLogoConfigSchema, data_key="logoConfig", allow_none=True, load_default=None
+    )
     theme = fields.Nested(StoreThemeSchema, allow_none=True, load_default=None)
 
 
@@ -49,4 +68,7 @@ class StoreUpdateSchema(TrimmingSchema):
     description = fields.String(validate=validate.Length(max=280))
     currency = fields.String(validate=validate.OneOf(CURRENCIES))
     logo = fields.String(allow_none=True)
+    logo_config = fields.Nested(
+        StoreLogoConfigSchema, data_key="logoConfig", allow_none=True
+    )
     theme = fields.Nested(StoreThemeSchema, allow_none=True)

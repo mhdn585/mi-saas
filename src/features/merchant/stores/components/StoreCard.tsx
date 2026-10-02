@@ -49,7 +49,7 @@ export function StoreCard({ store }: { store: Store }) {
 
       <div className="flex gap-2">
         <Link
-          to={`/stores/${store.id}`}
+          to={`/app/stores/${store.id}`}
           className={buttonClasses('primary', 'sm', 'flex-1')}
         >
           Administrar

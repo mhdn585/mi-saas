@@ -10,8 +10,8 @@ def _png_bytes(color=(255, 0, 0), size=(40, 40)):
     return buf
 
 
-def test_upload_image_success(client):
-    resp = client.post(
+def test_upload_image_success(auth_client):
+    resp = auth_client.post(
         "/api/v1/media",
         data={"file": (_png_bytes(), "foto.png")},
         content_type="multipart/form-data",
@@ -22,24 +22,24 @@ def test_upload_image_success(client):
     assert body["filename"].endswith(".jpg")
 
 
-def test_uploaded_image_is_served(client):
-    upload = client.post(
+def test_uploaded_image_is_served(auth_client):
+    upload = auth_client.post(
         "/api/v1/media",
         data={"file": (_png_bytes(), "foto.png")},
         content_type="multipart/form-data",
     ).get_json()
-    resp = client.get(upload["url"])
+    resp = auth_client.get(upload["url"])
     assert resp.status_code == 200
 
 
-def test_upload_missing_file_field(client):
-    resp = client.post("/api/v1/media", content_type="multipart/form-data")
+def test_upload_missing_file_field(auth_client):
+    resp = auth_client.post("/api/v1/media", content_type="multipart/form-data")
     assert resp.status_code == 422
 
 
-def test_upload_non_image_rejected(client):
+def test_upload_non_image_rejected(auth_client):
     data = io.BytesIO(b"esto no es una imagen")
-    resp = client.post(
+    resp = auth_client.post(
         "/api/v1/media",
         data={"file": (data, "truco.txt")},
         content_type="multipart/form-data",
@@ -47,8 +47,8 @@ def test_upload_non_image_rejected(client):
     assert resp.status_code == 422
 
 
-def test_health(client):
-    resp = client.get("/api/v1/health")
+def test_health(auth_client):
+    resp = auth_client.get("/api/v1/health")
     assert resp.status_code == 200
     assert resp.get_json() == {"status": "ok"}
 
@@ -65,8 +65,8 @@ def _asset_by_filename(app, filename):
         )
 
 
-def test_upload_registers_media_asset(client, app):
-    upload = client.post(
+def test_upload_registers_media_asset(auth_client, app):
+    upload = auth_client.post(
         "/api/v1/media",
         data={"file": (_png_bytes(size=(80, 40)), "foto.png")},
         content_type="multipart/form-data",
@@ -83,9 +83,9 @@ def test_upload_registers_media_asset(client, app):
     assert asset.url == upload["url"]
 
 
-def test_invalid_upload_does_not_create_asset(client, app):
+def test_invalid_upload_does_not_create_asset(auth_client, app):
     data = io.BytesIO(b"texto sin imagen")
-    resp = client.post(
+    resp = auth_client.post(
         "/api/v1/media",
         data={"file": (data, "nota.txt")},
         content_type="multipart/form-data",
@@ -101,7 +101,7 @@ def test_invalid_upload_does_not_create_asset(client, app):
     assert count == 0
 
 
-def test_store_logo_referenced_and_orphaned_on_delete(client, app, upload_image, make_store):
+def test_store_logo_referenced_and_orphaned_on_delete(auth_client, app, upload_image, make_store):
     img = upload_image()
     store = make_store(logo=img["url"])
     assert store["logo"] == img["url"]
@@ -110,7 +110,7 @@ def test_store_logo_referenced_and_orphaned_on_delete(client, app, upload_image,
     assert asset is not None
     assert asset.status == "active"
 
-    resp = client.delete(f"/api/v1/stores/{store['id']}")
+    resp = auth_client.delete(f"/api/v1/stores/{store['id']}")
     assert resp.status_code == 204
 
     from pathlib import Path
@@ -119,22 +119,32 @@ def test_store_logo_referenced_and_orphaned_on_delete(client, app, upload_image,
     assert _asset_by_filename(app, img["filename"]).status == "orphan"
 
 
-def test_store_logo_rejects_unknown_url(client, make_store):
-    resp = client.patch(
+def test_store_logo_rejects_unknown_url(auth_client, make_store):
+    resp = auth_client.patch(
         f"/api/v1/stores/{make_store()['id']}",
         json={"logo": "/media/jamas-subida.jpg"},
     )
     assert resp.status_code == 422
 
 
-def test_store_logo_change_orphans_previous(client, app, upload_image, make_store):
+def test_store_logo_change_orphans_previous(auth_client, app, upload_image, make_store):
     logo1 = upload_image()
     logo2 = upload_image()
     store = make_store(logo=logo1["url"])
-    resp = client.patch(
+    resp = auth_client.patch(
         f"/api/v1/stores/{store['id']}", json={"logo": logo2["url"]}
     )
     assert resp.status_code == 200
     assert resp.get_json()["logo"] == logo2["url"]
     assert _asset_by_filename(app, logo1["filename"]).status == "orphan"
     assert _asset_by_filename(app, logo2["filename"]).status == "active"
+
+
+def test_upload_requires_auth(client):
+    resp = client.post(
+        "/api/v1/media",
+        data={"file": (_png_bytes(), "foto.png")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 401
+    assert resp.get_json()["error"]["code"] == "no_autenticado"

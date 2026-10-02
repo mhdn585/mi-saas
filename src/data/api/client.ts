@@ -1,5 +1,20 @@
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
 
+let authToken: string | null = null
+let unauthorizedHandler: (() => void) | null = null
+
+export function setAuthToken(token: string | null): void {
+  authToken = token
+}
+
+export function setOnUnauthorized(handler: (() => void) | null): void {
+  unauthorizedHandler = handler
+}
+
+function authHeaders(): Record<string, string> {
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {}
+}
+
 export class ApiError extends Error {
   code: string
   status: number
@@ -31,12 +46,16 @@ async function parseError(response: Response): Promise<never> {
   throw new ApiError(message, code, response.status)
 }
 
+function buildHeaders(extra?: Record<string, string>): Record<string, string> {
+  return { 'Content-Type': 'application/json', ...authHeaders(), ...extra }
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
     response = await fetch(`${API_BASE}/api/v1${path}`, {
-      headers: { 'Content-Type': 'application/json' },
       ...init,
+      headers: buildHeaders(init?.headers as Record<string, string> | undefined),
     })
   } catch {
     throw new ApiError(
@@ -45,7 +64,10 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     )
   }
 
-  if (!response.ok) await parseError(response)
+  if (!response.ok) {
+    if (response.status === 401 && authToken) unauthorizedHandler?.()
+    await parseError(response)
+  }
   if (response.status === 204) return undefined as T
   return (await response.json()) as T
 }
@@ -63,6 +85,7 @@ export async function uploadMedia(file: File): Promise<MediaUploadResult> {
   try {
     response = await fetch(`${API_BASE}/api/v1/media`, {
       method: 'POST',
+      headers: authHeaders(),
       body,
     })
   } catch {
@@ -72,7 +95,10 @@ export async function uploadMedia(file: File): Promise<MediaUploadResult> {
     )
   }
 
-  if (!response.ok) await parseError(response)
+  if (!response.ok) {
+    if (response.status === 401 && authToken) unauthorizedHandler?.()
+    await parseError(response)
+  }
   return (await response.json()) as MediaUploadResult
 }
 

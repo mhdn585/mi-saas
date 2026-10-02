@@ -11,6 +11,7 @@ interface StoresState {
   loaded: boolean
   error: string | null
   load: (options?: { force?: boolean }) => Promise<void>
+  reset: () => void
   createStore: (data: NewStore) => Promise<Store>
   updateStore: (id: string, patch: Partial<NewStore>) => Promise<Store>
   deleteStore: (id: string) => Promise<void>
@@ -39,6 +40,8 @@ export const useStoresStore = create<StoresState>((set, get) => ({
       })
     }
   },
+
+  reset: () => set({ stores: [], loading: false, loaded: false, error: null }),
 
   createStore: async (data) => {
     const store = await storeRepository.create(data)

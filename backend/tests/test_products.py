@@ -1,4 +1,4 @@
-def _create_product(client, store_id, **overrides):
+def _create_product(auth_client, store_id, **overrides):
     payload = {
         "name": "Pan de campo 500g",
         "description": "Pan rústico horneado a leña",
@@ -7,33 +7,33 @@ def _create_product(client, store_id, **overrides):
         "published": True,
     }
     payload.update(overrides)
-    resp = client.post(f"/api/v1/stores/{store_id}/products", json=payload)
+    resp = auth_client.post(f"/api/v1/stores/{store_id}/products", json=payload)
     assert resp.status_code == 201
     return resp.get_json()
 
 
-def test_create_product(client, make_store):
+def test_create_product(auth_client, make_store):
     store = make_store()
-    body = _create_product(client, store["id"])
+    body = _create_product(auth_client, store["id"])
     assert body["id"]
     assert body["storeId"] == store["id"]
     assert body["price"] == 12.5
     assert body["published"] is True
 
 
-def test_create_product_requires_existing_store(client):
-    resp = client.post(
+def test_create_product_requires_existing_store(auth_client):
+    resp = auth_client.post(
         "/api/v1/stores/inexistente/products",
         json={"name": "X", "price": 1},
     )
     assert resp.status_code == 404
 
 
-def test_list_products_pagination(client, make_store):
+def test_list_products_pagination(auth_client, make_store):
     store = make_store()
     for i in range(3):
-        _create_product(client, store["id"], name=f"P{i}")
-    resp = client.get(
+        _create_product(auth_client, store["id"], name=f"P{i}")
+    resp = auth_client.get(
         f"/api/v1/stores/{store['id']}/products", query_string={"per_page": 2}
     )
     assert resp.status_code == 200
@@ -43,11 +43,11 @@ def test_list_products_pagination(client, make_store):
     assert body["pages"] == 2
 
 
-def test_list_products_published_only(client, make_store):
+def test_list_products_published_only(auth_client, make_store):
     store = make_store()
-    _create_product(client, store["id"], name="Publicado", published=True)
-    _create_product(client, store["id"], name="Oculto", published=False)
-    resp = client.get(
+    _create_product(auth_client, store["id"], name="Publicado", published=True)
+    _create_product(auth_client, store["id"], name="Oculto", published=False)
+    resp = auth_client.get(
         f"/api/v1/stores/{store['id']}/products",
         query_string={"published": "true"},
     )
@@ -56,11 +56,11 @@ def test_list_products_published_only(client, make_store):
     assert items[0]["name"] == "Publicado"
 
 
-def test_list_products_search(client, make_store):
+def test_list_products_search(auth_client, make_store):
     store = make_store()
-    _create_product(client, store["id"], name="Café torrado")
-    _create_product(client, store["id"], name="Té verde")
-    resp = client.get(
+    _create_product(auth_client, store["id"], name="Café torrado")
+    _create_product(auth_client, store["id"], name="Té verde")
+    resp = auth_client.get(
         f"/api/v1/stores/{store['id']}/products",
         query_string={"search": "caf"},
     )
@@ -69,10 +69,10 @@ def test_list_products_search(client, make_store):
     assert items[0]["name"] == "Café torrado"
 
 
-def test_update_product_toggle_published_and_stock(client, make_store):
+def test_update_product_toggle_published_and_stock(auth_client, make_store):
     store = make_store()
-    product = _create_product(client, store["id"])
-    resp = client.patch(
+    product = _create_product(auth_client, store["id"])
+    resp = auth_client.patch(
         f"/api/v1/products/{product['id']}",
         json={"published": False, "stock": 3},
     )
@@ -81,41 +81,41 @@ def test_update_product_toggle_published_and_stock(client, make_store):
     assert body["stock"] == 3
 
 
-def test_get_product_in_store_mismatch(client, make_store):
+def test_get_product_in_store_mismatch(auth_client, make_store):
     store = make_store()
     other = make_store(name="Otra")
-    product = _create_product(client, store["id"])
-    resp = client.get(
+    product = _create_product(auth_client, store["id"])
+    resp = auth_client.get(
         f"/api/v1/stores/{other['id']}/products/{product['id']}"
     )
     assert resp.status_code == 404
 
 
-def test_delete_product(client, make_store):
+def test_delete_product(auth_client, make_store):
     store = make_store()
-    product = _create_product(client, store["id"])
-    assert client.delete(f"/api/v1/products/{product['id']}").status_code == 204
-    assert client.get(f"/api/v1/products/{product['id']}").status_code == 404
+    product = _create_product(auth_client, store["id"])
+    assert auth_client.delete(f"/api/v1/products/{product['id']}").status_code == 204
+    assert auth_client.get(f"/api/v1/products/{product['id']}").status_code == 404
 
 
-def test_create_product_negative_price(client, make_store):
-    resp = client.post(
+def test_create_product_negative_price(auth_client, make_store):
+    resp = auth_client.post(
         f"/api/v1/stores/{make_store()['id']}/products",
         json={"name": "X", "price": -5},
     )
     assert resp.status_code == 422
 
 
-def test_create_product_negative_stock(client, make_store):
-    resp = client.post(
+def test_create_product_negative_stock(auth_client, make_store):
+    resp = auth_client.post(
         f"/api/v1/stores/{make_store()['id']}/products",
         json={"name": "X", "price": 1, "stock": -1},
     )
     assert resp.status_code == 422
 
 
-def test_create_product_too_many_images(client, make_store):
-    resp = client.post(
+def test_create_product_too_many_images(auth_client, make_store):
+    resp = auth_client.post(
         f"/api/v1/stores/{make_store()['id']}/products",
         json={"name": "X", "price": 1, "images": [f"/media/{i}.jpg" for i in range(13)]},
     )
@@ -145,18 +145,18 @@ def _asset_id_by_url(app, url):
         )
 
 
-def test_create_product_with_real_images_keeps_order(client, make_store, upload_image):
+def test_create_product_with_real_images_keeps_order(auth_client, make_store, upload_image):
     store = make_store()
     img1 = upload_image()
     img2 = upload_image()
     body = _create_product(
-        client, store["id"], images=[img1["url"], img2["url"]]
+        auth_client, store["id"], images=[img1["url"], img2["url"]]
     )
     assert body["images"] == [img1["url"], img2["url"]]
 
 
-def test_create_product_rejects_unknown_image(client, make_store):
-    resp = client.post(
+def test_create_product_rejects_unknown_image(auth_client, make_store):
+    resp = auth_client.post(
         f"/api/v1/stores/{make_store()['id']}/products",
         json={"name": "X", "price": 1, "images": ["/media/no-subida.jpg"]},
     )
@@ -164,22 +164,22 @@ def test_create_product_rejects_unknown_image(client, make_store):
     assert resp.get_json()["error"]["code"] == "validation_error"
 
 
-def test_create_product_rejects_duplicate_images(client, make_store, upload_image):
+def test_create_product_rejects_duplicate_images(auth_client, make_store, upload_image):
     img = upload_image()
-    resp = client.post(
+    resp = auth_client.post(
         f"/api/v1/stores/{make_store()['id']}/products",
         json={"name": "X", "price": 1, "images": [img["url"], img["url"]]},
     )
     assert resp.status_code == 422
 
 
-def test_update_product_images_marks_removed_as_orphan(client, app, make_store, upload_image):
+def test_update_product_images_marks_removed_as_orphan(auth_client, app, make_store, upload_image):
     store = make_store()
     img_a = upload_image()
     img_b = upload_image()
-    product = _create_product(client, store["id"], images=[img_a["url"], img_b["url"]])
+    product = _create_product(auth_client, store["id"], images=[img_a["url"], img_b["url"]])
 
-    resp = client.patch(
+    resp = auth_client.patch(
         f"/api/v1/products/{product['id']}", json={"images": [img_b["url"]]}
     )
     assert resp.status_code == 200
@@ -189,27 +189,27 @@ def test_update_product_images_marks_removed_as_orphan(client, app, make_store, 
     assert _asset_status(app, asset_a_id) == "orphan"
 
 
-def test_update_product_rereferences_orphan_reactivates(client, app, make_store, upload_image):
+def test_update_product_rereferences_orphan_reactivates(auth_client, app, make_store, upload_image):
     store = make_store()
     img = upload_image()
-    product = _create_product(client, store["id"], images=[img["url"]])
-    client.patch(f"/api/v1/products/{product['id']}", json={"images": []})
+    product = _create_product(auth_client, store["id"], images=[img["url"]])
+    auth_client.patch(f"/api/v1/products/{product['id']}", json={"images": []})
     url_ref = _asset_id_by_url(app, img["url"])
     assert _asset_status(app, url_ref) == "orphan"
 
-    resp = client.patch(
+    resp = auth_client.patch(
         f"/api/v1/products/{product['id']}", json={"images": [img["url"]]}
     )
     assert resp.status_code == 200
     assert _asset_status(app, url_ref) == "active"
 
 
-def test_delete_product_marks_assets_orphan_keeps_file(client, app, make_store, upload_image):
+def test_delete_product_marks_assets_orphan_keeps_file(auth_client, app, make_store, upload_image):
     store = make_store()
     img = upload_image()
-    product = _create_product(client, store["id"], images=[img["url"]])
+    product = _create_product(auth_client, store["id"], images=[img["url"]])
 
-    assert client.delete(f"/api/v1/products/{product['id']}").status_code == 204
+    assert auth_client.delete(f"/api/v1/products/{product['id']}").status_code == 204
 
     asset_id = _asset_id_by_url(app, img["url"])
     assert _asset_status(app, asset_id) == "orphan"
@@ -220,19 +220,19 @@ def test_delete_product_marks_assets_orphan_keeps_file(client, app, make_store, 
 
 
 def test_shared_asset_stays_active_after_deleting_one_product(
-    client, app, make_store, upload_image
+    auth_client, app, make_store, upload_image
 ):
     store = make_store()
     img = upload_image()
-    p1 = _create_product(client, store["id"], name="P1", images=[img["url"]])
-    _create_product(client, store["id"], name="P2", images=[img["url"]])
+    p1 = _create_product(auth_client, store["id"], name="P1", images=[img["url"]])
+    _create_product(auth_client, store["id"], name="P2", images=[img["url"]])
 
-    client.delete(f"/api/v1/products/{p1['id']}")
+    auth_client.delete(f"/api/v1/products/{p1['id']}")
     asset_id = _asset_id_by_url(app, img["url"])
     assert _asset_status(app, asset_id) == "active"
 
 
-def test_cleanup_orphans_deletes_after_grace(client, app, make_store, upload_image):
+def test_cleanup_orphans_deletes_after_grace(auth_client, app, make_store, upload_image):
     from pathlib import Path
     from time import time
 
@@ -246,12 +246,12 @@ def test_cleanup_orphans_deletes_after_grace(client, app, make_store, upload_ima
     media_file = Path(app.config["MEDIA_FOLDER"]) / img["filename"]
     assert media_file.exists()
 
-    resp = client.post(
+    resp = auth_client.post(
         f"/api/v1/stores/{make_store()['id']}/products",
         json={"name": "X", "price": 1, "images": [img["url"]]},
     )
     product_id = resp.get_json()["id"]
-    client.delete(f"/api/v1/products/{product_id}")
+    auth_client.delete(f"/api/v1/products/{product_id}")
 
     old_ms = int((time() - 10 * 86400) * 1000)
     with app.app_context():
@@ -264,3 +264,56 @@ def test_cleanup_orphans_deletes_after_grace(client, app, make_store, upload_ima
     assert not media_file.exists()
     asset_id = _asset_id_by_url(app, img["url"])
     assert _asset_status(app, asset_id) == "deleted"
+
+
+def test_anonymous_only_sees_published(client, auth_client, make_store):
+    store = make_store()
+    sid = store["id"]
+    _create_product(auth_client, sid, name="Visible", published=True)
+    _create_product(auth_client, sid, name="Secreto", published=False)
+
+    anon = client.get(f"/api/v1/stores/{sid}/products").get_json()
+    assert anon["total"] == 1
+    assert anon["items"][0]["name"] == "Visible"
+
+    full = auth_client.get(f"/api/v1/stores/{sid}/products").get_json()
+    assert full["total"] == 2
+
+
+def test_anonymous_get_unpublished_404(client, auth_client, make_store):
+    store = make_store()
+    product = _create_product(auth_client, store["id"], published=False)
+    assert client.get(f"/api/v1/products/{product['id']}").status_code == 404
+    assert auth_client.get(f"/api/v1/products/{product['id']}").status_code == 200
+
+
+def test_other_user_cannot_mutate_products(
+    client, register_user, make_store, auth_client
+):
+    store = make_store()
+    product = _create_product(auth_client, store["id"])
+    headers = {"Authorization": f"Bearer {register_user()['token']}"}
+    assert (
+        client.patch(
+            f"/api/v1/products/{product['id']}", json={"stock": 99}, headers=headers
+        ).status_code
+        == 404
+    )
+    assert (
+        client.delete(f"/api/v1/products/{product['id']}", headers=headers).status_code
+        == 404
+    )
+    assert (
+        auth_client.get(f"/api/v1/products/{product['id']}").get_json()["stock"] != 99
+    )
+
+
+def test_mutation_endpoints_require_auth(client):
+    assert (
+        client.post(
+            "/api/v1/stores/s1/products", json={"name": "X", "price": 1}
+        ).status_code
+        == 401
+    )
+    assert client.patch("/api/v1/products/p1", json={"stock": 1}).status_code == 401
+    assert client.delete("/api/v1/products/p1").status_code == 401

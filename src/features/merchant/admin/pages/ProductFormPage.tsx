@@ -28,7 +28,7 @@ export function ProductFormPage() {
 
   const isEditing = Boolean(productId)
 
-  const backUrl = useMemo(() => `/stores/${storeId}/products`, [storeId])
+  const backUrl = useMemo(() => `/app/stores/${storeId}/products`, [storeId])
 
   if (!store) {
     return (
@@ -36,7 +36,7 @@ export function ProductFormPage() {
         icon={<IconAlert width={24} height={24} />}
         title="Tienda no encontrada"
         action={
-          <Link to="/" className={buttonClasses('primary', 'md')}>
+          <Link to="/app" className={buttonClasses('primary', 'md')}>
             Ir a mis tiendas
           </Link>
         }

@@ -1,4 +1,5 @@
 import os
+import uuid
 from pathlib import Path
 
 import pytest
@@ -66,8 +67,8 @@ def app(migrated_test_db, tmp_path):
         db.session.remove()
         db.session.execute(
             text(
-                "TRUNCATE TABLE media_assets, product_images, products, stores "
-                "RESTART IDENTITY CASCADE"
+                "TRUNCATE TABLE users, media_assets, product_images, products, "
+                "stores RESTART IDENTITY CASCADE"
             )
         )
         db.session.commit()
@@ -79,7 +80,53 @@ def client(app):
 
 
 @pytest.fixture
-def make_store(client):
+def register_user(client):
+    """Crea una cuenta nueva vía la API y devuelve {user, token}."""
+
+    def _register(**overrides):
+        payload = {
+            "name": "Usuaria Test",
+            "email": f"user-{uuid.uuid4().hex}@example.test",
+            "password": "contra-sena-123",
+        }
+        payload.update(overrides)
+        resp = client.post("/api/v1/auth/register", json=payload)
+        assert resp.status_code == 201, resp.get_json()
+        return resp.get_json()
+
+    return _register
+
+
+@pytest.fixture
+def auth_token(register_user):
+    return register_user()["token"]
+
+
+@pytest.fixture
+def auth_client(client, auth_token):
+    """Test-client que envía Authorization: Bearer por defecto."""
+    auth_headers = {"Authorization": f"Bearer {auth_token}"}
+
+    class _AuthClient:
+        def __getattr__(self, name):
+            attr = getattr(client, name)
+            if name not in ("get", "post", "patch", "delete", "put", "open"):
+                return attr
+
+            def with_auth(*args, **kwargs):
+                kwargs["headers"] = {
+                    **auth_headers,
+                    **(kwargs.get("headers") or {}),
+                }
+                return attr(*args, **kwargs)
+
+            return with_auth
+
+    return _AuthClient()
+
+
+@pytest.fixture
+def make_store(auth_client):
     def _make(**overrides):
         payload = {
             "name": "Tienda Test",
@@ -88,7 +135,7 @@ def make_store(client):
             "logo": None,
         }
         payload.update(overrides)
-        resp = client.post("/api/v1/stores", json=payload)
+        resp = auth_client.post("/api/v1/stores", json=payload)
         assert resp.status_code == 201
         return resp.get_json()
 
@@ -96,7 +143,7 @@ def make_store(client):
 
 
 @pytest.fixture
-def upload_image(client):
+def upload_image(auth_client):
     """Sube una imagen de prueba real y devuelve su payload {url, filename}."""
 
     def _upload(color=(200, 30, 30), size=(60, 60)):
@@ -107,7 +154,7 @@ def upload_image(client):
         buf = io.BytesIO()
         Image.new("RGB", size, color).save(buf, "PNG")
         buf.seek(0)
-        resp = client.post(
+        resp = auth_client.post(
             "/api/v1/media",
             data={"file": (buf, "test.png")},
             content_type="multipart/form-data",

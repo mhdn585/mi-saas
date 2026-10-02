@@ -27,7 +27,7 @@ export function SettingsPage() {
         icon={<IconAlert width={24} height={24} />}
         title="Tienda no encontrada"
         action={
-          <Button onClick={() => navigate('/')}>Volver a mis tiendas</Button>
+          <Button onClick={() => navigate('/app')}>Volver a mis tiendas</Button>
         }
       />
     )
@@ -54,7 +54,7 @@ export function SettingsPage() {
     try {
       await deleteStore(store.id)
       showToast(`Tienda "${store.name}" eliminada`)
-      navigate('/')
+      navigate('/app')
     } catch (error) {
       showToast(
         error instanceof Error ? error.message : 'No se pudo eliminar la tienda',

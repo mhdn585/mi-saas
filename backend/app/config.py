@@ -9,6 +9,11 @@ APP_NAME = "CreaTienda"
 DEFAULT_CURRENCY = "USD"
 LOW_STOCK_THRESHOLD = 5
 
+# Auth: límites de contraseña compartidos por config y schemas.
+PASSWORD_MIN_LENGTH = 8
+# bcrypt solo consume los primeros 72 bytes: límite explícito.
+PASSWORD_MAX_LENGTH = 72
+
 CURRENCIES = [
     "USD",
     "EUR",
@@ -51,6 +56,11 @@ class Config:
     MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "5"))
     MAX_CONTENT_LENGTH = (MAX_UPLOAD_MB + 5) * 1024 * 1024
     JSON_AS_ASCII = False
+    # Auth
+    BCRYPT_COST = int(os.environ.get("BCRYPT_COST", "12"))
+    JWT_EXPIRES_HOURS = int(os.environ.get("JWT_EXPIRES_HOURS", "168"))
+    PASSWORD_MIN_LENGTH = 8
+    PASSWORD_MAX_LENGTH = 72  # bcrypt ignora bytes más allá de 72
 
 
 class DevConfig(Config):

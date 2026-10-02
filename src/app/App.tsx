@@ -3,15 +3,15 @@ import { BrowserRouter } from 'react-router-dom'
 import { AppRoutes } from './routes'
 import { ThemeProvider } from '@/theme/ThemeProvider'
 import { Toaster } from '@/shared/ui/Toaster'
-import { useStoresStore } from '@/store/storesStore'
+import { useAuthStore } from '@/store/authStore'
 
 export default function App() {
-  const load = useStoresStore((state) => state.load)
+  const bootstrap = useAuthStore((state) => state.bootstrap)
 
-  // Bootstrap: todas las tiendas del comerciante al montar (fuente de verdad: backend).
+  // Bootstrap: valida la sesión persistida; las tiendas se cargan en ProtectedRoute.
   useEffect(() => {
-    void load()
-  }, [load])
+    void bootstrap()
+  }, [bootstrap])
 
   return (
     <ThemeProvider>

@@ -5,9 +5,9 @@ commits) está en **español**.
 
 - Raíz: frontend React 18 + TypeScript + Vite + Tailwind + Zustand (`src/`).
 - `backend/`: API REST Flask + SQLAlchemy sobre **PostgreSQL** (esquema versionado con
-  Alembic) que **es la fuente de verdad de stores, productos y media**. El frontend ya NO
-  usa localStorage para datos de dominio; solo el carrito (`cartStore`) y el tema
-  (`uiStore`) siguen en localStorage.
+  Alembic) que **es la fuente de verdad de users, stores, productos y media**. El frontend ya NO
+  usa localStorage para datos de dominio; el carrito (`cartStore`), el tema (`uiStore`) y la
+  sesión (`authStore`: token JWT + user) siguen en localStorage.
 
 ## Comandos
 
@@ -30,9 +30,15 @@ Backend (`cd backend`, Python 3.11+ y PostgreSQL 14+):
 ## Arquitectura frontend (no obvia por nombres de carpeta)
 
 - Los datos de dominio fluyen: páginas → stores Zustand (`src/store/`) → repositorios async
-  (`src/data/repositories/`) → `src/data/api/client.ts` → Flask `/api/v1`.
-- `App.tsx` hace el bootstrap: carga todas las tiendas al montar. Cada layout
-  (`StoreDashboardLayout`, `StorefrontLayout`) dispara `loadForStore(storeId)` de
+  (`src/data/repositories/`) → `src/data/api/client.ts` → Flask `/api/v1`. El client inyecta
+  `Authorization: Bearer` (token que `authStore` sincroniza vía `setAuthToken()`) y ante un
+  401 llama a `logout()` (registrado con `setOnUnauthorized()`).
+- Auth: `authStore` (`src/store/authStore.ts`) persiste `{token,user}` (clave
+  `creatienda:session`) y expone `bootstrap/register/login/logout`. `App.tsx` solo corre
+  `bootstrap()` (valida el token con `GET /auth/me`); **`ProtectedRoute`** (`src/app/`) es el
+  que dispara `load()` de `storesStore` cuando hay sesión. `logout()` hace
+  `storesStore.reset()` para que otro usuario no vea datos del anterior.
+- Cada layout (`StoreDashboardLayout`, `StorefrontLayout`) dispara `loadForStore(storeId)` de
   `productsStore`. Páginas y layouts deben distinguir "cargando" de "no encontrado".
 - Las mutaciones son `async` y **lanzan `ApiError`**: las páginas hacen `try/catch` +
   `showToast`. No asumir retorno síncrono.
@@ -47,9 +53,12 @@ Backend (`cd backend`, Python 3.11+ y PostgreSQL 14+):
   (orden por `position`, la de position 0 es la portada). Borrar entidad NO borra archivos:
   los assets sin referencias pasan a `orphan` y se limpian con
   `flask --app run.py media cleanup --grace-days N`.
-- Rutas: TODA página debe registrarse en `src/app/routes.tsx`. Panel merchant bajo
-  `/stores/:storeId/...` (código en `src/features/merchant/`), tienda pública bajo
-  `/shop/:storeId` (código en `src/features/customer/`).
+- Rutas: TODA página debe registrarse en `src/app/routes.tsx`. Público: `/` (WelcomePage,
+  `src/features/landing/`), `/login` y `/registro` (`src/features/auth/`), `/shop/:storeId`
+  (tienda pública, código en `src/features/customer/`). Protegido con `ProtectedRoute` bajo
+  `/app`: listado en `/app`, alta en `/app/stores/new` y panel merchant en
+  `/app/stores/:storeId/...` (código en `src/features/merchant/`). Cambiar estas rutas exige
+  actualizar links (`/app/...`) en páginas y componentes merchant.
 - Tema de tienda (personalización de colores): `stores.theme` es JSON con 7 colores hex
   (`bg/fg/surface/muted/line/accent/accentFg`, NULL = default del sistema; `PATCH /stores/<id>`
   con `theme:null` restaura). Se aplica SOLO en `StorefrontLayout` vía `themeVarsStyle()`
@@ -78,9 +87,23 @@ Backend (`cd backend`, Python 3.11+ y PostgreSQL 14+):
 - Capas: rutas (`app/api/v1/`) → servicios (`app/services/`) → repositorios
   (`app/repositories/`) → modelos (`app/models/`). Prefijo real `/api/v1` (blueprints
   anidados: `api` + `v1`).
+- Auth: `POST /auth/register|login` devuelven `{user, token}` (JWT HS256 con clave derivada
+  `sha256(SECRET_KEY)` — `auth_service.signing_key()` — exp `JWT_EXPIRES_HOURS`=168h);
+  `GET /auth/me` protegido. Contraseñas: **bcrypt cost 12** (`password_hash` en `users`,
+  nunca se expone), 8–72 chars. Login fallido responde siempre 401 `credenciales_invalidas`
+  (no revela si el email existe). Guardas en rutas: `@login_required` (rellena
+  `g.current_user`) o `optional_user()` para endpoints mixtos; errores 401 con códigos
+  `no_autenticado/token_invalido/token_expirado`.
+- Visibilidad por rol (regla de dominio): cada store tiene `owner_id` (NULL = heredadas de la
+  era pre-usuarios, se asignan con `flask --app run.py user claim-orphan-stores EMAIL`).
+  PÚBLICO sin token: `GET /stores/<id>`, listado/`GET` de productos (solo `published`),
+  `GET /products/<pid>` (solo publicado), `GET /media/<file>`, `/auth/*`, `/health`. TODO lo
+  demás (mutaciones, `GET /stores`, paletas, `POST /media`) exige sesión Y además dueño: los
+  recursos ajenos responden **404** (no revelan existencia). El dueño sí ve borradores.
 - Las respuestas `to_dict()` de los modelos usan camelCase y **espejan exactamente**
-  `src/shared/types/domain.ts` (`id` UUID string, timestamps en ms, `price` como float).
-  Cambiar un modelo exige cambiar el dominio TS y los repos del frontend.
+  `src/shared/types/domain.ts` (`id` UUID string, timestamps en ms, `price` como float;
+  `User` nunca incluye `password`). Cambiar un modelo exige cambiar el dominio TS y los repos
+  del frontend.
 - Validación marshmallow (`app/schemas/`); errores JSON uniformes
   `{ "error": { "code", "message" } }` (`app/errors.py`). Whitelist de monedas en
   `app/config.py::CURRENCIES` = `src/config/constants.ts::CURRENCIES` (mantener sincronizadas).

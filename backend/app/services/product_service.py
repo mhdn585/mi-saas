@@ -9,9 +9,17 @@ from app.repositories.product_repo import product_repository
 from app.services import media_service
 
 
-def list_products(store_id, search=None, published_only=False, page=1, per_page=50):
+def list_products(
+    store_id,
+    search=None,
+    published_only=False,
+    page=1,
+    per_page=50,
+    include_unpublished: bool = False,
+):
+    """include_unpublished=False (anónimo/no dueño): fuerza solo publicados."""
     stmt = select(Product).where(Product.store_id == store_id)
-    if published_only:
+    if published_only or not include_unpublished:
         stmt = stmt.where(Product.published.is_(True))
     if search:
         term = f"%{search.strip().lower()}%"
@@ -27,11 +35,13 @@ def list_products(store_id, search=None, published_only=False, page=1, per_page=
     )
 
 
-def get_product(product_id, store_id=None):
+def get_product(product_id, store_id=None, include_unpublished: bool = False):
     product = product_repository.find_by_id(product_id)
     if product is None:
         raise NotFoundError("Producto no encontrado")
     if store_id is not None and product.store_id != store_id:
+        raise NotFoundError("Producto no encontrado")
+    if not include_unpublished and not product.published:
         raise NotFoundError("Producto no encontrado")
     return product
 

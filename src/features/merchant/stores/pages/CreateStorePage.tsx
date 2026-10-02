@@ -18,7 +18,7 @@ export function CreateStorePage() {
     try {
       const store = await createStore(values)
       showToast(`Tienda "${store.name}" creada`)
-      navigate(`/stores/${store.id}`)
+      navigate(`/app/stores/${store.id}`)
     } catch (error) {
       showToast(
         error instanceof Error ? error.message : 'No se pudo crear la tienda',
@@ -41,7 +41,7 @@ export function CreateStorePage() {
             onSubmit={(values) => {
               void handleSubmit(values)
             }}
-            onCancel={() => navigate('/')}
+            onCancel={() => navigate('/app')}
           />
         </Card>
       </main>

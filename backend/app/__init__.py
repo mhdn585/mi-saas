@@ -57,7 +57,14 @@ def create_app(config_object=None) -> Flask:
 
     @app.shell_context_processor
     def shell_context():
-        from app.models import MediaAsset, Product, ProductImage, Store
+        from app.models import (
+            MediaAsset,
+            Product,
+            ProductImage,
+            SavedPalette,
+            Store,
+            User,
+        )
 
         return {
             "db": db,
@@ -65,6 +72,8 @@ def create_app(config_object=None) -> Flask:
             "Store": Store,
             "MediaAsset": MediaAsset,
             "ProductImage": ProductImage,
+            "SavedPalette": SavedPalette,
+            "User": User,
         }
 
     return app

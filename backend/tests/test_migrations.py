@@ -33,13 +33,18 @@ def test_upgrade_downgrade_cycle(scratch_url):
     try:
         command.upgrade(cfg, "head")
         names = set(inspect(engine).get_table_names())
-        assert {"stores", "products", "media_assets", "product_images"} <= names
+        assert {"stores", "products", "media_assets", "product_images", "users",
+               "saved_palettes"} <= names
 
-        command.downgrade(cfg, "-1")
+        command.downgrade(cfg, "0003")
         names = set(inspect(engine).get_table_names())
+        columns = {c["name"] for c in inspect(engine).get_columns("stores")}
         assert "saved_palettes" not in names
+        assert "users" not in names
         assert "stores" in names
-        assert "theme" not in {c["name"] for c in inspect(engine).get_columns("stores")}
+        assert "theme" not in columns
+        assert "logo_config" not in columns
+        assert "owner_id" not in columns
 
         command.downgrade(cfg, "base")
         names = set(inspect(engine).get_table_names())
@@ -47,7 +52,8 @@ def test_upgrade_downgrade_cycle(scratch_url):
 
         command.upgrade(cfg, "head")
         names = set(inspect(engine).get_table_names())
-        assert {"stores", "products", "media_assets", "product_images"} <= names
+        assert {"stores", "products", "media_assets", "product_images", "users",
+               "saved_palettes"} <= names
 
         # constraints e índices sobreviven el ciclo
         with engine.connect() as conn:

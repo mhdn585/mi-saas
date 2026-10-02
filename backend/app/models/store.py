@@ -13,6 +13,12 @@ class Store(db.Model):
     __tablename__ = "stores"
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    owner_id = db.Column(
+        db.String(36),
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     name = db.Column(db.String(60), nullable=False)
     description = db.Column(db.Text, nullable=False, default="")
     currency = db.Column(db.String(3), nullable=False, default="USD")
@@ -25,6 +31,11 @@ class Store(db.Model):
     # camelCase (bg, fg, surface, muted, line, accent, accentFg) en hex.
     # NULL = colores por defecto del sistema.
     theme = db.Column(db.JSON, nullable=True)
+    # Configuración de cómo se muestra el logo en el header de la tienda pública:
+    # JSON { fit: "contain"|"cover", height: 24..56, positionX: 0..100,
+    #        positionY: 0..100, background: "#rrggbb"|null }.
+    # NULL = renderizado por defecto (entero, 40 px, transparente).
+    logo_config = db.Column(db.JSON, nullable=True)
     created_at = db.Column(db.BigInteger, default=_now_ms, nullable=False)
     updated_at = db.Column(
         db.BigInteger, default=_now_ms, onupdate=_now_ms, nullable=False
@@ -46,6 +57,8 @@ class Store(db.Model):
         lazy=True,
     )
 
+    owner = db.relationship("User", backref="stores", lazy="joined", innerjoin=False)
+
     logo_asset = db.relationship("MediaAsset", lazy="joined", innerjoin=False)
 
     @property
@@ -55,10 +68,12 @@ class Store(db.Model):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "ownerId": self.owner_id,
             "name": self.name,
             "description": self.description or "",
             "currency": self.currency,
             "logo": self.logo,
+            "logoConfig": self.logo_config,
             "theme": self.theme,
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
